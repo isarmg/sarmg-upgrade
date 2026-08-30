@@ -37,15 +37,21 @@ mod sentinel_0_1_to_0_2;
 mod sunshine_0_6_to_0_7;
 
 pub use dufs_0_49_7_to_0_50_0::{
-    DufsCompositeBackupManifest, DufsRecoveryOptions, DufsStoredResource, DufsTreeBudget,
-    DufsUpgradeOptions, DufsUpgradeResult, VerifiedDufsSourceBackup, recover_dufs_upgrade,
-    upgrade_dufs, verify_dufs_source_backup,
+    DufsCompositeBackupManifest, DufsCurrentBackupManifest, DufsCurrentOptions,
+    DufsCurrentRestoreOptions, DufsRecoveryOptions, DufsStoredResource, DufsTreeBudget,
+    DufsUpgradeOptions, DufsUpgradeResult, VerifiedDufsCurrentBackup, VerifiedDufsSourceBackup,
+    backup_dufs_current, recover_dufs_upgrade, restore_dufs_current, upgrade_dufs,
+    verify_dufs_current_backup, verify_dufs_source_backup,
 };
 pub use sentinel_0_1_to_0_2::{
     SentinelCompanionContract, SentinelRecordingArchive, SentinelRecoveryOptions,
     SentinelSourceBackupManifest, SentinelStoredFile, SentinelUpgradeOptions,
     SentinelUpgradeResult, VerifiedSentinelSourceBackup, recover_sentinel_upgrade,
     sentinel_credentials_key_from_file, upgrade_sentinel, verify_sentinel_source_backup,
+};
+pub(crate) use sentinel_0_1_to_0_2::{
+    verify_current_companion_contract, verify_current_credentials_contract,
+    verify_current_recordings_contract,
 };
 
 const SQLITE_SIDECARS: [&str; 3] = ["-wal", "-shm", "-journal"];
@@ -252,6 +258,7 @@ fn create_source_backup(
             .duration_since(UNIX_EPOCH)
             .context("system clock is before the Unix epoch")?
             .as_secs(),
+        external_requirements: Vec::new(),
         resources: vec![ResourceEntry {
             name: "database".to_owned(),
             kind: ResourceKind::Sqlite,

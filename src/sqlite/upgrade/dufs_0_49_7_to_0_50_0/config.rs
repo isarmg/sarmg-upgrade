@@ -156,23 +156,7 @@ impl ConfigAnchor {
         );
         validate_named_identity(&parent, &name, after)?;
 
-        let text = std::str::from_utf8(&bytes).context("Dufs config is not UTF-8")?;
-        let raw: RawDufsConfig = serde_yaml::from_str(text)
-            .context("Dufs config does not match the exact protected YAML contract")?;
-        let shared_root = require_absolute_normal_path(
-            raw.serve_path
-                .context("Dufs config must explicitly set serve-path")?,
-            "serve-path",
-        )?;
-        let state_dir = require_absolute_normal_path(
-            raw.state_dir
-                .context("Dufs config must explicitly set state-dir")?,
-            "state-dir",
-        )?;
-        let accounts = raw
-            .auth
-            .context("Dufs config must explicitly contain auth accounts")?;
-        let usernames = parse_auth_accounts(&accounts)?;
+        let parsed = parse_bytes(&bytes)?;
         let sha256 = lower_hex(&Sha256::digest(&bytes));
 
         Ok(Self {
@@ -183,11 +167,7 @@ impl ConfigAnchor {
             bytes,
             sha256,
             configured_path,
-            parsed: ParsedDufsConfig {
-                shared_root,
-                state_dir,
-                usernames,
-            },
+            parsed,
         })
     }
 
@@ -239,6 +219,35 @@ impl ConfigAnchor {
             sensitive: true,
         }
     }
+}
+
+pub(super) fn parse_bytes(bytes: &[u8]) -> anyhow::Result<ParsedDufsConfig> {
+    ensure!(
+        bytes.len() as u64 <= MAX_CONFIG_BYTES,
+        "Dufs config is too large"
+    );
+    let text = std::str::from_utf8(bytes).context("Dufs config is not UTF-8")?;
+    let raw: RawDufsConfig = serde_yaml::from_str(text)
+        .context("Dufs config does not match the exact protected YAML contract")?;
+    let shared_root = require_absolute_normal_path(
+        raw.serve_path
+            .context("Dufs config must explicitly set serve-path")?,
+        "serve-path",
+    )?;
+    let state_dir = require_absolute_normal_path(
+        raw.state_dir
+            .context("Dufs config must explicitly set state-dir")?,
+        "state-dir",
+    )?;
+    let accounts = raw
+        .auth
+        .context("Dufs config must explicitly contain auth accounts")?;
+    let usernames = parse_auth_accounts(&accounts)?;
+    Ok(ParsedDufsConfig {
+        shared_root,
+        state_dir,
+        usernames,
+    })
 }
 
 fn validate_security(

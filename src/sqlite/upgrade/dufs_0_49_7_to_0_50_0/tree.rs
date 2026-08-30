@@ -1091,6 +1091,23 @@ fn copy_tree(source: &Path, destination: &Path, budget: DufsTreeBudget) -> anyho
     Ok(())
 }
 
+pub(super) fn restore_tree_into_empty(
+    source: &Path,
+    destination: &Path,
+    budget: DufsTreeBudget,
+) -> anyhow::Result<TreeInventory> {
+    ensure!(
+        fs::read_dir(destination)?.next().is_none(),
+        "Dufs restore shared root must be empty"
+    );
+    let expected = inventory_path(source, budget)?;
+    copy_tree(source, destination, budget)?;
+    sync_tree(destination)?;
+    let actual = inventory_path(destination, budget)?;
+    ensure!(actual == expected, "restored Dufs tree inventory mismatch");
+    Ok(actual)
+}
+
 fn copy_sparse_file(
     source_path: &Path,
     destination_path: &Path,

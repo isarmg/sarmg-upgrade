@@ -67,7 +67,7 @@ const MIGRATIONS: [(i64, &str, &str); 3] = [
 const SOURCE_SCHEMA_SHA256: &str =
     "b1c025356eb3ac3f17ff6e94e262dccb05be08d78ef1350670cd6a6c08aca4ea";
 const TARGET_SCHEMA_SHA256: &str =
-    "73a26cfd0d8d55f1559407904fe6445e278310614750cc1c0f3306a2803b7df6";
+    "b089342e00e672d6e6c679e15f331c90e599129371042a37948a4b53e5f8e49e";
 const TARGET_SOURCE_COMMIT: &str = "e51a4a90933547c1f95b625635a4430e4632acb9";
 const CREDENTIAL_PRODUCT: &str = "sentinel-monitor";
 const CREDENTIAL_APPLICATION_VERSION: &str = "0.2.0";
@@ -1297,6 +1297,45 @@ fn inspect_current_credentials(path: &Path, key: &[u8; 32]) -> anyhow::Result<Cr
         }
     }
     Ok(inventory)
+}
+
+pub(crate) fn verify_current_credentials_contract(
+    database: &Path,
+    key_id: &str,
+    key: &[u8; 32],
+) -> anyhow::Result<()> {
+    ensure!(
+        key_id == CREDENTIAL_KEY_ID,
+        "Sentinel credentials key id does not match the exact current contract"
+    );
+    verify_sentinel_target_database(database, key)?;
+    Ok(())
+}
+
+pub(crate) fn verify_current_recordings_contract(
+    database: &Path,
+    recordings: &Path,
+) -> anyhow::Result<()> {
+    let summary = summarize_database(database, SentinelDatabaseContract::Target)?;
+    let root = SecureDirectory::open(recordings, "Sentinel current recordings directory")?;
+    let inventory = inventory_recordings(&root)?;
+    cross_check_recordings(&summary, &inventory)
+}
+
+pub(crate) fn verify_current_companion_contract(
+    config: &Path,
+    contract: &Path,
+    recordings: &Path,
+) -> anyhow::Result<()> {
+    let config = SecureFile::open(config, "MediaMTX config")?;
+    let parsed_config = parse_media_config(&config)?;
+    ensure!(
+        super::super::absolute_path(&parsed_config.recording_root)?
+            == super::super::absolute_path(recordings)?,
+        "MediaMTX config points at a different current recordings directory"
+    );
+    let contract = SecureFile::open(contract, "MediaMTX contract")?;
+    validate_exact_contract(&parse_contract(&contract)?)
 }
 
 fn parse_camera_id(value: &str) -> anyhow::Result<Uuid> {

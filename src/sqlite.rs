@@ -8,7 +8,12 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use aes_gcm::{
+    Aes256Gcm, Nonce,
+    aead::{Aead, KeyInit},
+};
 use anyhow::{Context, ensure};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use rusqlite::{Connection, OpenFlags, backup::Backup as SqliteBackup};
 use rustix::{
     fs::{
@@ -21,7 +26,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
-    BackupManifest, Product, ResourceEntry, ResourceKind, SchemaIdentity,
+    BackupManifest, ExternalRequirement, Product, ResourceEntry, ResourceKind, SchemaIdentity,
     manifest::MANIFEST_VERSION,
 };
 
@@ -29,17 +34,43 @@ mod restore;
 mod upgrade;
 pub use restore::{
     RecoveryAction, RecoveryResult, RestoreExisting, RestoreResult, recover_sqlite_restore,
-    restore_sqlite_backup,
+    restore_sqlite_backup, restore_sqlite_backup_with_credentials,
 };
 pub use upgrade::{
-    DufsCompositeBackupManifest, DufsRecoveryOptions, DufsStoredResource, DufsTreeBudget,
+    DufsCompositeBackupManifest, DufsCurrentBackupManifest, DufsCurrentOptions,
+    DufsCurrentRestoreOptions, DufsRecoveryOptions, DufsStoredResource, DufsTreeBudget,
     DufsUpgradeOptions, DufsUpgradeResult, SentinelCompanionContract, SentinelRecordingArchive,
     SentinelRecoveryOptions, SentinelSourceBackupManifest, SentinelStoredFile,
-    SentinelUpgradeOptions, SentinelUpgradeResult, SqliteUpgradeResult, VerifiedDufsSourceBackup,
-    VerifiedSentinelSourceBackup, VerifiedSourceBackup, recover_dufs_upgrade,
-    recover_sentinel_upgrade, sentinel_credentials_key_from_file, upgrade_dufs, upgrade_sentinel,
-    upgrade_sqlite, verify_dufs_source_backup, verify_sentinel_source_backup, verify_source_backup,
+    SentinelUpgradeOptions, SentinelUpgradeResult, SqliteUpgradeResult, VerifiedDufsCurrentBackup,
+    VerifiedDufsSourceBackup, VerifiedSentinelSourceBackup, VerifiedSourceBackup,
+    backup_dufs_current, recover_dufs_upgrade, recover_sentinel_upgrade, restore_dufs_current,
+    sentinel_credentials_key_from_file, upgrade_dufs, upgrade_sentinel, upgrade_sqlite,
+    verify_dufs_current_backup, verify_dufs_source_backup, verify_sentinel_source_backup,
+    verify_source_backup,
 };
+
+pub(crate) fn verify_sentinel_current_credentials(
+    database: &Path,
+    key_id: &str,
+    key: &[u8; 32],
+) -> anyhow::Result<()> {
+    upgrade::verify_current_credentials_contract(database, key_id, key)
+}
+
+pub(crate) fn verify_sentinel_current_recordings(
+    database: &Path,
+    recordings: &Path,
+) -> anyhow::Result<()> {
+    upgrade::verify_current_recordings_contract(database, recordings)
+}
+
+pub(crate) fn verify_sentinel_current_companion(
+    config: &Path,
+    contract: &Path,
+    recordings: &Path,
+) -> anyhow::Result<()> {
+    upgrade::verify_current_companion_contract(config, contract, recordings)
+}
 
 const DATABASE_FILE: &str = "database.sqlite3";
 const MANIFEST_FILE: &str = "manifest.json";
@@ -58,7 +89,7 @@ pub(super) const HOST_CURRENT_SCHEMA_SHA256: &str =
 pub(super) const SUNSHINE_CURRENT_APPLICATION_VERSION: &str = "0.7.0";
 pub(super) const SUNSHINE_CURRENT_SCHEMA_REVISION: u64 = 1;
 pub(super) const SUNSHINE_CURRENT_SCHEMA_SHA256: &str =
-    "1e55653f9b9b4805873164e52b79d399aec4fe327a8648218d4cbcb16b561b98";
+    "8618a2ac77bb67378bdcca3af390c711e64e742c5d81d04072c98845bdc9f4df";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct OfficialSqliteIdentity {
@@ -118,11 +149,42 @@ pub fn create_sqlite_backup(
     database: &Path,
     output: &Path,
 ) -> anyhow::Result<VerifiedSqliteBackup> {
+    ensure!(
+        !product.contract().requires_external_credentials_key,
+        "{product} backup requires an explicit external credentials key"
+    );
+    create_sqlite_backup_internal(product, database, output, None)
+}
+
+pub fn create_sqlite_backup_with_credentials(
+    product: Product,
+    database: &Path,
+    output: &Path,
+    key_id: &str,
+    credentials_key: &[u8; 32],
+) -> anyhow::Result<VerifiedSqliteBackup> {
+    ensure!(
+        product == Product::SunshineManager,
+        "keyed SQLite backup is only defined for sunshine-manager"
+    );
+    validate_key_id(key_id)?;
+    create_sqlite_backup_internal(product, database, output, Some((key_id, credentials_key)))
+}
+
+fn create_sqlite_backup_internal(
+    product: Product,
+    database: &Path,
+    output: &Path,
+    credentials: Option<(&str, &[u8; 32])>,
+) -> anyhow::Result<VerifiedSqliteBackup> {
     require_sqlite_only_product(product)?;
     let maintenance = MaintenanceLock::shared(product, database)?;
     let source_path = maintenance.database_path();
     let source_identity = verify_official_sqlite_database(&source_path, product)
         .context("verify current source database before backup")?;
+    if let Some((key_id, key)) = credentials {
+        verify_sunshine_encrypted_values(&source_path, key_id, key)?;
+    }
 
     let mut pending = PendingDirectory::create(output)?;
     let pending_path = pending.path();
@@ -134,6 +196,9 @@ pub fn create_sqlite_backup(
         snapshot_identity == source_identity,
         "database identity changed while the backup was created"
     );
+    if let Some((key_id, key)) = credentials {
+        verify_sunshine_encrypted_values(&database_output, key_id, key)?;
+    }
 
     let (bytes, sha256) = hash_regular_file(&database_output)?;
     let manifest = BackupManifest {
@@ -146,6 +211,10 @@ pub fn create_sqlite_backup(
             .duration_since(UNIX_EPOCH)
             .context("system clock is before the Unix epoch")?
             .as_secs(),
+        external_requirements: credentials
+            .map(|(key_id, key)| sunshine_external_requirement(key_id, key))
+            .into_iter()
+            .collect(),
         resources: vec![ResourceEntry {
             name: "database".to_owned(),
             kind: ResourceKind::Sqlite,
@@ -161,7 +230,10 @@ pub fn create_sqlite_backup(
     pending.commit()?;
     drop(maintenance);
 
-    verify_sqlite_backup(product, output)
+    match credentials {
+        Some((key_id, key)) => verify_sqlite_backup_with_credentials(product, output, key_id, key),
+        None => verify_sqlite_backup(product, output),
+    }
 }
 
 /// Verify the full backup set against the explicitly selected official product
@@ -169,6 +241,32 @@ pub fn create_sqlite_backup(
 pub fn verify_sqlite_backup(
     product: Product,
     input: &Path,
+) -> anyhow::Result<VerifiedSqliteBackup> {
+    ensure!(
+        !product.contract().requires_external_credentials_key,
+        "{product} verification requires an explicit external credentials key"
+    );
+    verify_sqlite_backup_internal(product, input, None)
+}
+
+pub fn verify_sqlite_backup_with_credentials(
+    product: Product,
+    input: &Path,
+    key_id: &str,
+    credentials_key: &[u8; 32],
+) -> anyhow::Result<VerifiedSqliteBackup> {
+    ensure!(
+        product == Product::SunshineManager,
+        "keyed SQLite verification is only defined for sunshine-manager"
+    );
+    validate_key_id(key_id)?;
+    verify_sqlite_backup_internal(product, input, Some((key_id, credentials_key)))
+}
+
+fn verify_sqlite_backup_internal(
+    product: Product,
+    input: &Path,
+    credentials: Option<(&str, &[u8; 32])>,
 ) -> anyhow::Result<VerifiedSqliteBackup> {
     let official = official_sqlite_identity(product)?;
     let directory = SecureDirectory::open(input, "backup directory")?;
@@ -184,6 +282,16 @@ pub fn verify_sqlite_backup(
         manifest.product == product,
         "SQLite backup product does not match the explicit product"
     );
+    match credentials {
+        Some((key_id, key)) => ensure!(
+            manifest.external_requirements == [sunshine_external_requirement(key_id, key)],
+            "external credentials key does not match the backup manifest"
+        ),
+        None => ensure!(
+            manifest.external_requirements.is_empty(),
+            "backup unexpectedly requires an external key"
+        ),
+    }
     ensure!(
         manifest.application_version == official.application_version,
         "SQLite backup version is not the official current version for {product}"
@@ -212,6 +320,9 @@ pub fn verify_sqlite_backup(
         "SQLite backup checksum does not match its manifest"
     );
     let identity = verify_official_sqlite_database(&database_path, product)?;
+    if let Some((key_id, key)) = credentials {
+        verify_sunshine_encrypted_values(&database_path, key_id, key)?;
+    }
     ensure!(
         manifest.schema_identity.as_ref() == Some(&identity),
         "SQLite backup schema identity does not match its manifest"
@@ -225,6 +336,68 @@ pub fn verify_sqlite_backup(
         directory: absolute_path(input)?,
         manifest,
     })
+}
+
+fn sunshine_external_requirement(key_id: &str, key: &[u8; 32]) -> ExternalRequirement {
+    ExternalRequirement {
+        kind: "credentials-key".to_owned(),
+        kid: key_id.to_owned(),
+        sha256: lower_hex(&Sha256::digest(key)),
+        algorithm: "aes-256-gcm".to_owned(),
+        envelope_version: 1,
+    }
+}
+
+fn validate_key_id(value: &str) -> anyhow::Result<()> {
+    ensure!(
+        !value.is_empty()
+            && value.len() <= 64
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')),
+        "credentials key id is invalid"
+    );
+    Ok(())
+}
+
+pub(super) fn verify_sunshine_encrypted_values(
+    database: &Path,
+    key_id: &str,
+    key: &[u8; 32],
+) -> anyhow::Result<()> {
+    let connection = open_read_only(database)?;
+    let cipher = Aes256Gcm::new_from_slice(key).expect("32-byte Sunshine key");
+    for (table, column, require_json) in [
+        ("hosts", "secret", false),
+        ("operations", "request_ciphertext", true),
+    ] {
+        let sql = format!("SELECT {column} FROM {table} WHERE {column} IS NOT NULL ORDER BY rowid");
+        let mut statement = connection.prepare(&sql)?;
+        let values = statement.query_map([], |row| row.get::<_, String>(0))?;
+        for value in values {
+            let value = value?;
+            let prefix = format!("sunshine:v1:{key_id}:");
+            let encoded = value
+                .strip_prefix(&prefix)
+                .context("Sunshine ciphertext key id or envelope version mismatch")?;
+            let payload = STANDARD
+                .decode(encoded)
+                .context("Sunshine ciphertext is not canonical base64")?;
+            ensure!(payload.len() > 12, "Sunshine ciphertext is truncated");
+            let plaintext = cipher
+                .decrypt(Nonce::from_slice(&payload[..12]), &payload[12..])
+                .map_err(|_| {
+                    anyhow::anyhow!("credentials key cannot authenticate Sunshine encrypted state")
+                })?;
+            if require_json {
+                serde_json::from_slice::<serde_json::Value>(&plaintext)
+                    .context("Sunshine operation ciphertext does not contain JSON")?;
+            } else {
+                String::from_utf8(plaintext).context("Sunshine host credential is not UTF-8")?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn verify_official_sqlite_database(
@@ -921,22 +1094,21 @@ mod tests {
     }
 
     #[test]
-    fn official_allowlist_accepts_exact_host_and_sunshine_identities() {
-        for product in [Product::HostMonitoring, Product::SunshineManager] {
-            let root = tempfile::tempdir().unwrap();
-            let database = root.path().join("current.sqlite3");
-            let output = root.path().join("backup");
-            let official = official_sqlite_identity(product).unwrap();
-            create_current_database(&database, product, official.application_version);
+    fn official_allowlist_accepts_exact_host_identity() {
+        let product = Product::HostMonitoring;
+        let root = tempfile::tempdir().unwrap();
+        let database = root.path().join("current.sqlite3");
+        let output = root.path().join("backup");
+        let official = official_sqlite_identity(product).unwrap();
+        create_current_database(&database, product, official.application_version);
 
-            let created = create_sqlite_backup(product, &database, &output).unwrap();
-            let identity = created.manifest.schema_identity.as_ref().unwrap();
-            assert_eq!(identity.application, product.slug());
-            assert_eq!(identity.application_version, official.application_version);
-            assert_eq!(identity.schema_revision, official.schema_revision);
-            assert_eq!(identity.schema_sha256, official.schema_sha256);
-            verify_sqlite_backup(product, &output).unwrap();
-        }
+        let created = create_sqlite_backup(product, &database, &output).unwrap();
+        let identity = created.manifest.schema_identity.as_ref().unwrap();
+        assert_eq!(identity.application, product.slug());
+        assert_eq!(identity.application_version, official.application_version);
+        assert_eq!(identity.schema_revision, official.schema_revision);
+        assert_eq!(identity.schema_sha256, official.schema_sha256);
+        verify_sqlite_backup(product, &output).unwrap();
     }
 
     #[test]
@@ -1118,18 +1290,18 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let database = root.path().join("source.sqlite3");
         let output = root.path().join("backup");
-        create_current_database(&database, Product::SunshineManager, "0.7.0");
+        create_current_database(&database, Product::HostMonitoring, "0.7.0");
         let location = DatabaseLocation::resolve(&database).unwrap();
         let exclusive = location
             .acquire_lock(
-                Product::SunshineManager,
+                Product::HostMonitoring,
                 FlockOperation::NonBlockingLockExclusive,
             )
             .unwrap();
 
-        assert!(create_sqlite_backup(Product::SunshineManager, &database, &output).is_err());
+        assert!(create_sqlite_backup(Product::HostMonitoring, &database, &output).is_err());
         assert!(!output.exists());
         drop(exclusive);
-        create_sqlite_backup(Product::SunshineManager, &database, &output).unwrap();
+        create_sqlite_backup(Product::HostMonitoring, &database, &output).unwrap();
     }
 }

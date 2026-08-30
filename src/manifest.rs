@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Product, ResourceKind};
 
-pub const MANIFEST_VERSION: u32 = 1;
+pub const MANIFEST_VERSION: u32 = 2;
 
 /// The manifest is written last. Its presence declares a complete backup set.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -20,7 +20,18 @@ pub struct BackupManifest {
     pub application_version: String,
     pub schema_identity: Option<SchemaIdentity>,
     pub created_at_epoch_seconds: u64,
+    pub external_requirements: Vec<ExternalRequirement>,
     pub resources: Vec<ResourceEntry>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExternalRequirement {
+    pub kind: String,
+    pub kid: String,
+    pub sha256: String,
+    pub algorithm: String,
+    pub envelope_version: u32,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -78,6 +89,24 @@ impl BackupManifest {
                 .as_ref()
                 .ok_or(ManifestError::MissingSchemaIdentity)?;
             identity.validate(self.product)?;
+        }
+        if self.product == Product::SunshineManager && self.application_version == "0.7.0" {
+            if self.external_requirements.len() != 1
+                || self.external_requirements[0].kind != "credentials-key"
+            {
+                return Err(ManifestError::MissingExternalCredentialsKey);
+            }
+        } else if !self.external_requirements.is_empty() {
+            return Err(ManifestError::UnexpectedExternalRequirements(self.product));
+        }
+        for requirement in &self.external_requirements {
+            require_identifier("external requirement kind", &requirement.kind)?;
+            require_identifier("external requirement kid", &requirement.kid)?;
+            require_identifier("external requirement algorithm", &requirement.algorithm)?;
+            validate_sha256(&requirement.sha256)?;
+            if requirement.envelope_version == 0 {
+                return Err(ManifestError::InvalidEnvelopeVersion);
+            }
         }
 
         let mut names = BTreeSet::new();
@@ -175,6 +204,12 @@ pub enum ManifestError {
     MissingResources(Product),
     #[error("a SQLite backup manifest must include schema_identity")]
     MissingSchemaIdentity,
+    #[error("Sunshine backup manifest lacks its exact external credentials-key requirement")]
+    MissingExternalCredentialsKey,
+    #[error("backup manifest for {0} unexpectedly declares external requirements")]
+    UnexpectedExternalRequirements(Product),
+    #[error("external requirement envelope version must be non-zero")]
+    InvalidEnvelopeVersion,
     #[error("manifest product {product} does not match schema application {application:?}")]
     ProductIdentityMismatch {
         product: Product,
@@ -211,6 +246,7 @@ mod tests {
                 schema_sha256: "b".repeat(64),
             }),
             created_at_epoch_seconds: 1,
+            external_requirements: Vec::new(),
             resources: vec![ResourceEntry {
                 name: "database".into(),
                 kind: ResourceKind::Sqlite,

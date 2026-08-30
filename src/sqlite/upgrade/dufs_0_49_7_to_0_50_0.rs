@@ -66,6 +66,57 @@ const NEW_STAGE_DIRECTORY: &[u8] = b".dufs-upload-stages";
 const UPLOAD_PREFIX: &[u8] = b".dufs-upload-";
 const UPLOAD_SUFFIX: &[u8] = b".part";
 const READINESS_PREFIX: &[u8] = b".dufs-readiness-";
+const CURRENT_BACKUP_MANIFEST_VERSION: u32 = 2;
+
+#[derive(Clone, Debug)]
+pub struct DufsCurrentOptions {
+    pub database: PathBuf,
+    pub output: PathBuf,
+    pub config: PathBuf,
+    pub shared_root: PathBuf,
+    pub state_dir: PathBuf,
+    pub service_uid: u32,
+    pub service_gid: u32,
+    pub tree_budget: DufsTreeBudget,
+}
+
+#[derive(Clone, Debug)]
+pub struct DufsCurrentRestoreOptions {
+    pub input: PathBuf,
+    pub database: PathBuf,
+    pub config: PathBuf,
+    pub shared_root: PathBuf,
+    pub state_dir: PathBuf,
+    pub service_uid: u32,
+    pub service_gid: u32,
+    pub replace_config: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DufsCurrentBackupManifest {
+    pub manifest_version: u32,
+    pub adapter_id: String,
+    pub tool_version: String,
+    pub product: Product,
+    pub application_version: String,
+    pub schema_identity: SchemaIdentity,
+    pub created_at_epoch_seconds: u64,
+    pub database: DufsStoredResource,
+    pub config: DufsConfigMetadata,
+    pub config_file: DufsStoredResource,
+    pub root_device: u64,
+    pub root_inode: u64,
+    pub tree: TreeInventory,
+    pub database_records: BTreeMap<String, u64>,
+    pub tree_budget: DufsTreeBudget,
+}
+
+#[derive(Clone, Debug)]
+pub struct VerifiedDufsCurrentBackup {
+    pub directory: PathBuf,
+    pub manifest: DufsCurrentBackupManifest,
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -101,6 +152,327 @@ pub struct DufsUpgradeOptions {
     pub service_uid: u32,
     pub service_gid: u32,
     pub tree_budget: DufsTreeBudget,
+}
+
+pub fn backup_dufs_current(
+    options: &DufsCurrentOptions,
+) -> anyhow::Result<VerifiedDufsCurrentBackup> {
+    options.tree_budget.validate()?;
+    let mut config = ConfigAnchor::open(&options.config, options.service_uid, options.service_gid)?;
+    ensure!(
+        config.parsed.shared_root == absolute_path(&options.shared_root)?
+            && config.parsed.state_dir == absolute_path(&options.state_dir)?,
+        "Dufs current paths do not match the protected config"
+    );
+    ensure!(
+        absolute_path(&options.database)?
+            == absolute_path(&options.state_dir)?.join("state.sqlite3"),
+        "Dufs current database must be state-dir/state.sqlite3"
+    );
+    tree::validate_disjoint_paths(
+        &options.shared_root,
+        &options.state_dir,
+        config.configured_path(),
+        &options.output,
+    )?;
+    let maintenance = MaintenanceLock::exclusive(Product::DufsRam, &options.database)?;
+    let root = RootAnchor::lock(
+        &options.shared_root,
+        options.service_uid,
+        options.service_gid,
+    )?;
+    let synthetic = DufsUpgradeOptions {
+        product: Product::DufsRam,
+        from_version: FROM_VERSION.to_owned(),
+        to_version: TO_VERSION.to_owned(),
+        database: options.database.clone(),
+        backup_output: options.output.clone(),
+        config: options.config.clone(),
+        shared_root: options.shared_root.clone(),
+        state_dir: options.state_dir.clone(),
+        service_uid: options.service_uid,
+        service_gid: options.service_gid,
+        tree_budget: options.tree_budget,
+    };
+    validate_state_and_database(&synthetic, &maintenance, &root)?;
+    let source = SourceClone::create(&maintenance, Product::DufsRam)?;
+    let identity = verify_target_database(&source.database(), root.identity())?;
+    let records = inspect_record_counts(&source.database())?;
+    let mut pending = PendingDirectory::create(&options.output)?;
+    let output = pending.path();
+    create_private_empty_file(&output.join(BACKUP_DATABASE_FILE))?;
+    copy_database_online(&source.database(), &output.join(BACKUP_DATABASE_FILE))?;
+    ensure!(
+        verify_target_database(&output.join(BACKUP_DATABASE_FILE), root.identity())? == identity,
+        "Dufs current database identity changed while it was backed up"
+    );
+    copy_config(&config, &output.join(BACKUP_CONFIG_FILE))?;
+    let tree = root.backup_tree(&output.join(BACKUP_TREE_DIRECTORY), options.tree_budget)?;
+    source.ensure_source_unchanged()?;
+    root.ensure_unchanged()?;
+    config.ensure_unchanged()?;
+    let (database_bytes, database_sha256) = hash_regular_file(&output.join(BACKUP_DATABASE_FILE))?;
+    let (config_bytes, config_sha256) = hash_regular_file(&output.join(BACKUP_CONFIG_FILE))?;
+    let manifest = DufsCurrentBackupManifest {
+        manifest_version: CURRENT_BACKUP_MANIFEST_VERSION,
+        adapter_id: "dufs-ram-current-0.50.0-r1".to_owned(),
+        tool_version: env!("CARGO_PKG_VERSION").to_owned(),
+        product: Product::DufsRam,
+        application_version: TO_VERSION.to_owned(),
+        schema_identity: identity,
+        created_at_epoch_seconds: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs(),
+        database: DufsStoredResource {
+            path: BACKUP_DATABASE_FILE.to_owned(),
+            bytes: database_bytes,
+            sha256: database_sha256,
+        },
+        config: config.metadata(),
+        config_file: DufsStoredResource {
+            path: BACKUP_CONFIG_FILE.to_owned(),
+            bytes: config_bytes,
+            sha256: config_sha256,
+        },
+        root_device: root.identity().device,
+        root_inode: root.identity().inode,
+        tree,
+        database_records: records,
+        tree_budget: options.tree_budget,
+    };
+    validate_current_manifest(&manifest)?;
+    write_json_create_new(&output.join(BACKUP_MANIFEST_FILE), &manifest)?;
+    sync_directory(&output)?;
+    pending.commit()?;
+    verify_dufs_current_backup(&options.output)
+}
+
+pub fn verify_dufs_current_backup(input: &Path) -> anyhow::Result<VerifiedDufsCurrentBackup> {
+    let directory = SecureDirectory::open(input, "Dufs current backup directory")?;
+    ensure!(
+        directory.entry_names()?
+            == vec![
+                BACKUP_DATABASE_FILE.to_owned(),
+                BACKUP_CONFIG_FILE.to_owned(),
+                BACKUP_MANIFEST_FILE.to_owned(),
+                BACKUP_TREE_DIRECTORY.to_owned(),
+            ],
+        "Dufs current backup entry set is not exact"
+    );
+    let manifest: DufsCurrentBackupManifest =
+        serde_json::from_slice(&directory.read_bounded(BACKUP_MANIFEST_FILE, 64 * 1024 * 1024)?)?;
+    validate_current_manifest(&manifest)?;
+    verify_stored_file(&directory, &manifest.database)?;
+    verify_stored_file(&directory, &manifest.config_file)?;
+    ensure!(
+        verify_target_database(
+            &directory.child_path(BACKUP_DATABASE_FILE),
+            tree::RootIdentity {
+                device: manifest.root_device,
+                inode: manifest.root_inode
+            },
+        )? == manifest.schema_identity,
+        "Dufs current backup database identity mismatch"
+    );
+    ensure!(
+        inspect_record_counts(&directory.child_path(BACKUP_DATABASE_FILE))?
+            == manifest.database_records,
+        "Dufs current backup database records mismatch"
+    );
+    ensure!(
+        tree::inventory_path(
+            &directory.child_path(BACKUP_TREE_DIRECTORY),
+            manifest.tree_budget
+        )? == manifest.tree,
+        "Dufs current backup tree inventory mismatch"
+    );
+    Ok(VerifiedDufsCurrentBackup {
+        directory: absolute_path(input)?,
+        manifest,
+    })
+}
+
+pub fn restore_dufs_current(
+    options: &DufsCurrentRestoreOptions,
+) -> anyhow::Result<VerifiedDufsCurrentBackup> {
+    let backup = verify_dufs_current_backup(&options.input)?;
+    ensure!(
+        absolute_path(&options.database)?
+            == absolute_path(&options.state_dir)?.join("state.sqlite3"),
+        "Dufs restore database must be state-dir/state.sqlite3"
+    );
+    tree::validate_core_path_relationships(
+        &options.shared_root,
+        &options.state_dir,
+        &options.config,
+    )?;
+    let parsed = config::parse_bytes(&fs::read(backup.directory.join(BACKUP_CONFIG_FILE))?)?;
+    ensure!(
+        parsed.shared_root == absolute_path(&options.shared_root)?
+            && parsed.state_dir == absolute_path(&options.state_dir)?,
+        "backup Dufs config does not bind the explicit restore paths"
+    );
+    tree::validate_state_directory(&options.state_dir, options.service_uid, options.service_gid)?;
+    let maintenance = MaintenanceLock::exclusive(Product::DufsRam, &options.database)?;
+    ensure!(
+        !options.database.exists(),
+        "Dufs current restore only installs into a missing database target"
+    );
+    let root = RootAnchor::lock(
+        &options.shared_root,
+        options.service_uid,
+        options.service_gid,
+    )?;
+    ensure!(
+        fs::read_dir(&options.shared_root)?.next().is_none(),
+        "Dufs current restore only installs into an empty shared root"
+    );
+    ensure!(
+        options.replace_config || !options.config.exists(),
+        "Dufs config already exists; pass --replace-config"
+    );
+
+    let nonce = uuid::Uuid::new_v4().simple().to_string();
+    let database_stage = options
+        .state_dir
+        .join(format!(".state.sqlite3.restore-{nonce}"));
+    let config_stage = options
+        .config
+        .parent()
+        .context("Dufs config has no parent")?
+        .join(format!(".dufs-config.restore-{nonce}"));
+    let config_original = options
+        .config
+        .parent()
+        .context("Dufs config has no parent")?
+        .join(format!(".dufs-config.original-{nonce}"));
+
+    copy_regular_exact(
+        &backup.directory.join(BACKUP_DATABASE_FILE),
+        &database_stage,
+    )?;
+    let connection = Connection::open_with_flags(
+        &database_stage,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    configure_verifier(&connection)?;
+    connection.execute(
+        "UPDATE store_meta SET value=?1 WHERE key='root-device-be'",
+        [root.identity().device.to_be_bytes().to_vec()],
+    )?;
+    connection.execute(
+        "UPDATE store_meta SET value=?1 WHERE key='root-inode-be'",
+        [root.identity().inode.to_be_bytes().to_vec()],
+    )?;
+    drop(connection);
+    let database_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&database_stage)?;
+    fchown(
+        &database_file,
+        Some(Uid::from_raw(options.service_uid)),
+        Some(Gid::from_raw(options.service_gid)),
+    )?;
+    fs::set_permissions(
+        &database_stage,
+        std::os::unix::fs::PermissionsExt::from_mode(0o600),
+    )?;
+    database_file.sync_all()?;
+    ensure!(
+        verify_target_database(&database_stage, root.identity())?
+            == backup.manifest.schema_identity,
+        "rebound Dufs restore database is invalid"
+    );
+
+    copy_regular_exact(&backup.directory.join(BACKUP_CONFIG_FILE), &config_stage)?;
+    let config_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&config_stage)?;
+    fchown(
+        &config_file,
+        Some(Uid::from_raw(backup.manifest.config.uid)),
+        Some(Gid::from_raw(backup.manifest.config.gid)),
+    )?;
+    fs::set_permissions(
+        &config_stage,
+        std::os::unix::fs::PermissionsExt::from_mode(backup.manifest.config.mode),
+    )?;
+    config_file.sync_all()?;
+    ConfigAnchor::open(&config_stage, options.service_uid, options.service_gid)?;
+
+    let restored_tree = tree::restore_tree_into_empty(
+        &backup.directory.join(BACKUP_TREE_DIRECTORY),
+        &options.shared_root,
+        backup.manifest.tree_budget,
+    )?;
+    ensure!(
+        restored_tree == backup.manifest.tree,
+        "Dufs restored tree differs from backup"
+    );
+    // Tree installation intentionally restores root metadata, so the empty
+    // target snapshot is no longer the right postcondition. Keep the original
+    // locked FD alive, then independently re-open the configured path and
+    // require it to resolve to the same inode with valid service ownership.
+    let restored_root = RootAnchor::open_unlocked(
+        &options.shared_root,
+        options.service_uid,
+        options.service_gid,
+    )?;
+    ensure!(
+        restored_root.identity() == root.identity(),
+        "Dufs shared-root identity changed while restoring the tree"
+    );
+
+    if options.config.exists() {
+        fs::rename(&options.config, &config_original)?;
+    }
+    fs::rename(&config_stage, &options.config)?;
+    sync_directory(
+        options
+            .config
+            .parent()
+            .context("Dufs config has no parent")?,
+    )?;
+    fs::rename(&database_stage, &options.database)?;
+    sync_directory(&options.state_dir)?;
+    verify_target_database(&options.database, restored_root.identity())?;
+    ConfigAnchor::open(&options.config, options.service_uid, options.service_gid)?;
+    if config_original.exists() {
+        fs::remove_file(config_original)?;
+    }
+    drop(maintenance);
+    Ok(backup)
+}
+
+fn validate_current_manifest(manifest: &DufsCurrentBackupManifest) -> anyhow::Result<()> {
+    ensure!(
+        manifest.manifest_version == CURRENT_BACKUP_MANIFEST_VERSION
+            && manifest.adapter_id == "dufs-ram-current-0.50.0-r1"
+            && manifest.tool_version == env!("CARGO_PKG_VERSION")
+            && manifest.product == Product::DufsRam
+            && manifest.application_version == TO_VERSION,
+        "Dufs current backup adapter identity is not exact"
+    );
+    ensure!(
+        manifest.schema_identity
+            == SchemaIdentity {
+                application: Product::DufsRam.slug().to_owned(),
+                application_version: TO_VERSION.to_owned(),
+                schema_revision: TARGET_REVISION,
+                schema_sha256: SCHEMA_SHA256.to_owned(),
+            },
+        "Dufs current backup schema identity is not exact"
+    );
+    ensure!(
+        manifest.database.path == BACKUP_DATABASE_FILE
+            && manifest.config_file.path == BACKUP_CONFIG_FILE
+            && manifest.config_file.bytes == manifest.config.bytes
+            && manifest.config_file.sha256 == manifest.config.sha256
+            && manifest.config.sensitive,
+        "Dufs current backup resource identity is invalid"
+    );
+    manifest.tree_budget.validate()?;
+    Ok(())
 }
 
 impl std::fmt::Debug for DufsUpgradeOptions {

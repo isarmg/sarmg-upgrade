@@ -43,11 +43,17 @@ impl Product {
                 has_runtime_state: true,
                 requires_external_credentials_key: false,
             },
-            Self::HostMonitoring | Self::SunshineManager => ProductContract {
+            Self::HostMonitoring => ProductContract {
                 product: self,
                 resources: &[ResourceKind::Sqlite],
                 has_runtime_state: true,
                 requires_external_credentials_key: false,
+            },
+            Self::SunshineManager => ProductContract {
+                product: self,
+                resources: &[ResourceKind::Sqlite],
+                has_runtime_state: true,
+                requires_external_credentials_key: true,
             },
             Self::SentinelMonitor => ProductContract {
                 product: self,
@@ -144,6 +150,15 @@ mod tests {
     fn sentinel_declares_its_external_credentials_key_requirement() {
         assert!(
             Product::SentinelMonitor
+                .contract()
+                .requires_external_credentials_key
+        );
+    }
+
+    #[test]
+    fn sunshine_declares_its_external_credentials_key_requirement() {
+        assert!(
+            Product::SunshineManager
                 .contract()
                 .requires_external_credentials_key
         );

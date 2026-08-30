@@ -25,6 +25,7 @@ use super::{
     DATABASE_FILE, DatabaseLocation, MaintenanceLock, SecureDirectory, absolute_path,
     hash_regular_file, official_sqlite_identity, secure_resolve_flags, verify_current_database,
     verify_official_sqlite_database, verify_official_sqlite_identity, verify_sqlite_backup,
+    verify_sqlite_backup_with_credentials,
 };
 use crate::{Product, SchemaIdentity};
 
@@ -103,12 +104,60 @@ pub fn restore_sqlite_backup(
     database: &Path,
     existing: RestoreExisting,
 ) -> anyhow::Result<RestoreResult> {
+    ensure!(
+        !product.contract().requires_external_credentials_key,
+        "{product} restore requires an explicit external credentials key"
+    );
+    restore_sqlite_backup_internal(
+        product,
+        expected_application_version,
+        input,
+        database,
+        existing,
+        None,
+    )
+}
+
+pub fn restore_sqlite_backup_with_credentials(
+    product: Product,
+    expected_application_version: &str,
+    input: &Path,
+    database: &Path,
+    existing: RestoreExisting,
+    key_id: &str,
+    credentials_key: &[u8; 32],
+) -> anyhow::Result<RestoreResult> {
+    ensure!(
+        product == Product::SunshineManager,
+        "keyed SQLite restore is only defined for sunshine-manager"
+    );
+    restore_sqlite_backup_internal(
+        product,
+        expected_application_version,
+        input,
+        database,
+        existing,
+        Some((key_id, credentials_key)),
+    )
+}
+
+fn restore_sqlite_backup_internal(
+    product: Product,
+    expected_application_version: &str,
+    input: &Path,
+    database: &Path,
+    existing: RestoreExisting,
+    credentials: Option<(&str, &[u8; 32])>,
+) -> anyhow::Result<RestoreResult> {
     let official = official_sqlite_identity(product)?;
     ensure!(
         expected_application_version == official.application_version,
         "--expect-version is not the official current version for {product}"
     );
-    let backup = verify_sqlite_backup(product, input)?;
+    let backup = match credentials {
+        Some((key_id, key)) => verify_sqlite_backup_with_credentials(product, input, key_id, key)?,
+        None => verify_sqlite_backup(product, input)?,
+    };
     let expected_identity = backup
         .manifest
         .schema_identity
@@ -1238,34 +1287,33 @@ mod tests {
     }
 
     #[test]
-    fn restores_exact_official_host_and_sunshine_without_replace_flag() {
-        for product in [Product::HostMonitoring, Product::SunshineManager] {
-            let root = tempfile::tempdir().unwrap();
-            let source = root.path().join("source.sqlite3");
-            let backup = root.path().join("backup");
-            let destination = root.path().join("restored.sqlite3");
-            let official = official_sqlite_identity(product).unwrap();
-            create_current_database(&source, product, official.application_version);
-            insert_test_record(&source, product, "saved");
-            create_sqlite_backup(product, &source, &backup).unwrap();
+    fn restores_exact_official_host_without_replace_flag() {
+        let product = Product::HostMonitoring;
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source.sqlite3");
+        let backup = root.path().join("backup");
+        let destination = root.path().join("restored.sqlite3");
+        let official = official_sqlite_identity(product).unwrap();
+        create_current_database(&source, product, official.application_version);
+        insert_test_record(&source, product, "saved");
+        create_sqlite_backup(product, &source, &backup).unwrap();
 
-            restore_sqlite_backup(
-                product,
-                official.application_version,
-                &backup,
-                &destination,
-                RestoreExisting::Refuse,
-            )
-            .unwrap();
-            assert_eq!(test_record_count(&destination, product), 1);
-            assert!(fs::read_dir(root.path()).unwrap().all(|entry| {
-                !entry
-                    .unwrap()
-                    .file_name()
-                    .to_string_lossy()
-                    .contains(".restore-")
-            }));
-        }
+        restore_sqlite_backup(
+            product,
+            official.application_version,
+            &backup,
+            &destination,
+            RestoreExisting::Refuse,
+        )
+        .unwrap();
+        assert_eq!(test_record_count(&destination, product), 1);
+        assert!(fs::read_dir(root.path()).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains(".restore-")
+        }));
     }
 
     #[test]
@@ -1274,14 +1322,14 @@ mod tests {
         let source = root.path().join("source.sqlite3");
         let destination = root.path().join("destination.sqlite3");
         let backup = root.path().join("backup");
-        create_current_database(&source, Product::SunshineManager, "0.7.0");
-        create_current_database(&destination, Product::SunshineManager, "0.7.0");
+        create_current_database(&source, Product::HostMonitoring, "0.7.0");
+        create_current_database(&destination, Product::HostMonitoring, "0.7.0");
         let before = fs::read(&destination).unwrap();
-        create_sqlite_backup(Product::SunshineManager, &source, &backup).unwrap();
+        create_sqlite_backup(Product::HostMonitoring, &source, &backup).unwrap();
 
         assert!(
             restore_sqlite_backup(
-                Product::SunshineManager,
+                Product::HostMonitoring,
                 "0.7.0",
                 &backup,
                 &destination,

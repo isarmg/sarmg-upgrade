@@ -1,6 +1,6 @@
 [package]
 name = "isarmg-upgrade"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.98"
 authors = ["sarmg <isarmg@163.com>"]
@@ -13,6 +13,7 @@ aes-gcm = "0.10"
 anyhow = "1"
 argon2 = "0.5"
 base64 = "0.22"
+blake3 = "1"
 clap = { version = "4.5", features = ["derive"] }
 hkdf = "0.12"
 rand = "0.8"
