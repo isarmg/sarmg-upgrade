@@ -25,15 +25,21 @@ application version or schema identity without modifying it.
 The catalog includes all six repositories. `isarmg-foundation` is a library and
 therefore has source/API upgrade adapters but no runtime backup resources.
 
-## Initial commands
+## Commands
 
 ```console
 isarmg-upgrade catalog --json
 isarmg-upgrade inspect-manifest /path/to/backup/manifest.json
+isarmg-upgrade backup-sqlite --product host-monitoring \\
+  --database /var/lib/isarmg/host-monitoring/app.sqlite3 \\
+  --output /srv/backup/host-monitoring-0.7.0
+isarmg-upgrade verify-sqlite /srv/backup/host-monitoring-0.7.0
 ```
 
-Backup, restore, and version-to-version commands are added only together with a
-tested product adapter. This avoids advertising an unsafe generic migration.
+The SQLite-only command supports Host Monitoring and Sunshine Manager. Composite
+Photo, Sentinel, and Dufs commands, restore, and version-to-version commands are
+added only together with their tested product adapters. This avoids advertising
+an unsafe generic migration.
 
 ## Development
 

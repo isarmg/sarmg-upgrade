@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use isarmg_upgrade::{BackupManifest, Product};
+use isarmg_upgrade::{BackupManifest, Product, create_sqlite_backup, verify_sqlite_backup};
 
 #[derive(Debug, Parser)]
 #[command(name = "isarmg-upgrade", version, about)]
@@ -24,6 +24,20 @@ enum Command {
         #[arg(value_name = "MANIFEST")]
         manifest: PathBuf,
     },
+    /// Create a current-format backup for a SQLite-only product.
+    BackupSqlite {
+        #[arg(long)]
+        product: Product,
+        #[arg(long, value_name = "DATABASE")]
+        database: PathBuf,
+        #[arg(long, value_name = "NEW_DIRECTORY")]
+        output: PathBuf,
+    },
+    /// Verify an immutable SQLite-only backup set.
+    VerifySqlite {
+        #[arg(value_name = "BACKUP_DIRECTORY")]
+        input: PathBuf,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -33,6 +47,20 @@ fn main() -> anyhow::Result<()> {
             let manifest = BackupManifest::read(&manifest)
                 .with_context(|| format!("inspect {}", manifest.display()))?;
             println!("{}", serde_json::to_string_pretty(&manifest)?);
+            Ok(())
+        }
+        Command::BackupSqlite {
+            product,
+            database,
+            output,
+        } => {
+            let backup = create_sqlite_backup(product, &database, &output)?;
+            println!("{}", serde_json::to_string_pretty(&backup.manifest)?);
+            Ok(())
+        }
+        Command::VerifySqlite { input } => {
+            let backup = verify_sqlite_backup(&input)?;
+            println!("{}", serde_json::to_string_pretty(&backup.manifest)?);
             Ok(())
         }
     }

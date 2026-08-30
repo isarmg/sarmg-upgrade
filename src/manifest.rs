@@ -18,9 +18,18 @@ pub struct BackupManifest {
     pub tool_version: String,
     pub product: Product,
     pub application_version: String,
-    pub schema_identity: Option<String>,
+    pub schema_identity: Option<SchemaIdentity>,
     pub created_at_epoch_seconds: u64,
     pub resources: Vec<ResourceEntry>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SchemaIdentity {
+    pub application: String,
+    pub application_version: String,
+    pub schema_revision: u64,
+    pub schema_sha256: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -40,7 +49,12 @@ impl BackupManifest {
             path: path.to_path_buf(),
             source,
         })?;
-        let manifest: Self = serde_json::from_slice(&bytes)?;
+        let manifest = Self::from_slice(&bytes)?;
+        Ok(manifest)
+    }
+
+    pub fn from_slice(bytes: &[u8]) -> Result<Self, ManifestError> {
+        let manifest: Self = serde_json::from_slice(bytes)?;
         manifest.validate()?;
         Ok(manifest)
     }
@@ -58,12 +72,12 @@ impl BackupManifest {
             .resources
             .iter()
             .any(|resource| resource.kind == ResourceKind::Sqlite)
-            && self
-                .schema_identity
-                .as_deref()
-                .is_none_or(|value| value.is_empty())
         {
-            return Err(ManifestError::MissingSchemaIdentity);
+            let identity = self
+                .schema_identity
+                .as_ref()
+                .ok_or(ManifestError::MissingSchemaIdentity)?;
+            identity.validate(self.product)?;
         }
 
         let mut names = BTreeSet::new();
@@ -86,6 +100,21 @@ impl BackupManifest {
                 return Err(ManifestError::ResourcesNotSorted);
             }
             previous_name = Some(&resource.name);
+        }
+        Ok(())
+    }
+}
+
+impl SchemaIdentity {
+    pub fn validate(&self, product: Product) -> Result<(), ManifestError> {
+        require_identifier("schema application", &self.application)?;
+        require_identifier("schema application_version", &self.application_version)?;
+        validate_sha256(&self.schema_sha256)?;
+        if self.application != product.slug() {
+            return Err(ManifestError::ProductIdentityMismatch {
+                product,
+                application: self.application.clone(),
+            });
         }
         Ok(())
     }
@@ -146,6 +175,11 @@ pub enum ManifestError {
     MissingResources(Product),
     #[error("a SQLite backup manifest must include schema_identity")]
     MissingSchemaIdentity,
+    #[error("manifest product {product} does not match schema application {application:?}")]
+    ProductIdentityMismatch {
+        product: Product,
+        application: String,
+    },
     #[error("resource path is not a safe relative path: {0}")]
     UnsafePath(PathBuf),
     #[error("resource SHA-256 is not canonical lowercase hexadecimal: {0:?}")]
@@ -170,7 +204,12 @@ mod tests {
             tool_version: "0.1.0".into(),
             product: Product::HostMonitoring,
             application_version: "0.7.0".into(),
-            schema_identity: Some("host-monitoring:0.7.0:1:sha256".into()),
+            schema_identity: Some(SchemaIdentity {
+                application: "host-monitoring".into(),
+                application_version: "0.7.0".into(),
+                schema_revision: 1,
+                schema_sha256: "b".repeat(64),
+            }),
             created_at_epoch_seconds: 1,
             resources: vec![ResourceEntry {
                 name: "database".into(),
