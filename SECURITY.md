@@ -35,10 +35,17 @@ database maintenance lock. They refuse a mismatched config, companion contract,
 recording root, orphan recording path, or undecryptable camera credential before
 publishing a backup or changing the database. The private base64 credentials-key
 file must decode to exactly 32 bytes; its path and contents are not written to the
-backup or recovery journal and are never included in JSON output. Only its
-non-secret SHA-256 identifier appears in the manifest and JSON output. The
-composite backup does contain the MediaMTX config and recordings, which may
-themselves be sensitive and must be protected accordingly.
+backup or recovery journal and are never included in JSON output. The adapter
+uses that external key to decrypt the 0.1 raw AES-GCM credentials and emits only
+the pinned 0.2 HKDF-SHA256-derived canonical JSON envelopes. Each envelope is
+authenticated against its camera UUID and exact database field, so a value
+cannot be moved between cameras or between URL, username, and password fields.
+Recovery commit revalidates every envelope with the explicitly supplied key;
+rollback never needs to reinterpret old credential bytes. Only the key's
+non-secret SHA-256 identifier and the non-secret envelope contract appear in the
+manifest and JSON output. The composite backup does contain the MediaMTX config
+and recordings, which may themselves be sensitive and must be protected
+accordingly.
 
 Dufs upgrades require an exact protected YAML config, numeric service uid/gid,
 state directory, and shared root. The config is opened without following links,

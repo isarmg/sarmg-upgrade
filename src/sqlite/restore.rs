@@ -289,13 +289,14 @@ fn verify_official_recovery_generation(
     Ok(())
 }
 
-pub(super) fn recover_sqlite_restore_under_lock(
+pub(super) fn recover_sqlite_restore_under_lock_with_verifier(
     recovery_path: &Path,
     expected_product: Product,
     expected_database: &Path,
     expected_identity: &SchemaIdentity,
     maintenance: &MaintenanceLock,
     action: RecoveryAction,
+    verify_incoming: impl Fn(&Path) -> anyhow::Result<()>,
 ) -> anyhow::Result<RecoveryResult> {
     let recovery = RecoveryDirectory::open(recovery_path)?;
     let journal = recovery.read_journal()?;
@@ -319,7 +320,36 @@ pub(super) fn recover_sqlite_restore_under_lock(
         absolute_path(expected_database)? == destination,
         "recovery journal destination does not match the explicit database"
     );
+    if action == RecoveryAction::Commit {
+        verify_composite_recovery_incoming(&recovery, &journal, &verify_incoming)?;
+    }
     recover_sqlite_restore_locked(recovery, journal, destination, maintenance, action)
+}
+
+fn verify_composite_recovery_incoming(
+    recovery: &RecoveryDirectory,
+    journal: &RestoreJournal,
+    verify: &impl Fn(&Path) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    let mut verified = false;
+    for (parent, name) in [
+        (&recovery.directory.file, INCOMING_FILE),
+        (&recovery.directory.file, "abandoned-new.sqlite3"),
+        (&recovery.parent.file, journal.destination_name.as_str()),
+    ] {
+        let Some((bytes, sha256)) = regular_file_hash_if_present(parent, name)? else {
+            continue;
+        };
+        if bytes == journal.incoming_bytes && sha256 == journal.incoming_sha256 {
+            verify(&child_path(parent, name))?;
+            verified = true;
+        }
+    }
+    ensure!(
+        verified,
+        "composite recovery has no verifiable exact incoming generation"
+    );
+    Ok(())
 }
 
 fn recover_sqlite_restore_locked(

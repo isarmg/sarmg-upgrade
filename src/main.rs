@@ -145,6 +145,12 @@ enum Command {
         runtime_directory: PathBuf,
         #[arg(long, value_name = "RECOVERY_DIRECTORY")]
         recovery: PathBuf,
+        #[arg(
+            long,
+            value_name = "BASE64_KEY_FILE",
+            required_if_eq("action", "commit")
+        )]
+        credentials_key_file: Option<PathBuf>,
         #[arg(long)]
         action: RecoveryAction,
     },
@@ -355,8 +361,13 @@ fn main() -> anyhow::Result<()> {
             database,
             runtime_directory,
             recovery,
+            credentials_key_file,
             action,
         } => {
+            let credentials_key = credentials_key_file
+                .as_deref()
+                .map(sentinel_credentials_key_from_file)
+                .transpose()?;
             let result = recover_sentinel_upgrade(&SentinelRecoveryOptions {
                 product,
                 from_version,
@@ -365,6 +376,7 @@ fn main() -> anyhow::Result<()> {
                 runtime_directory,
                 recovery_directory: recovery,
                 action,
+                credentials_key,
             })?;
             println!("{}", serde_json::to_string_pretty(&result)?);
             Ok(())
@@ -471,6 +483,7 @@ fn print_catalog(json: bool) -> anyhow::Result<()> {
                     "product": product,
                     "runtime_state": contract.has_runtime_state,
                     "resources": contract.resources,
+                    "requires_external_credentials_key": contract.requires_external_credentials_key,
                 })
             })
             .collect();
@@ -484,7 +497,12 @@ fn print_catalog(json: bool) -> anyhow::Result<()> {
                 .map(|resource| format!("{resource:?}").to_lowercase())
                 .collect::<Vec<_>>()
                 .join(",");
-            println!("{product}\t{resources}");
+            let credentials = if contract.requires_external_credentials_key {
+                "\texternal-credentials-key=required"
+            } else {
+                ""
+            };
+            println!("{product}\t{resources}{credentials}");
         }
     }
     Ok(())

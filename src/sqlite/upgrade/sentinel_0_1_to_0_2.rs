@@ -6,15 +6,20 @@ use std::{
     os::fd::AsRawFd,
     os::unix::fs::OpenOptionsExt,
     path::{Component, Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use aes_gcm::{
     Aes256Gcm, Nonce,
-    aead::{Aead, KeyInit},
+    aead::{Aead, KeyInit, Payload},
 };
 use anyhow::{Context, ensure};
-use base64::{Engine as _, engine::general_purpose::STANDARD};
+use base64::{
+    Engine as _,
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+};
+use hkdf::Hkdf;
+use rand::{RngCore, rngs::OsRng};
 use rusqlite::{Connection, OpenFlags};
 use rustix::{
     fs::{AtFlags, FileType, FlockOperation, Mode, OFlags, fstat, mkdirat, openat2, statat},
@@ -25,17 +30,15 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use super::{
-    Adapter, DATABASE_FILE, MaintenanceLock, PendingDirectory, Product, RestorePoint,
-    SchemaIdentity, SecureDirectory, SourceClone, TargetStaging, copy_database_online,
-    copy_regular_file_at, create_private_empty_file, create_target_database,
+    Adapter, DATABASE_FILE, MaintenanceLock, PRODUCT_METADATA_DDL, PendingDirectory, Product,
+    RestorePoint, SchemaIdentity, SecureDirectory, SourceClone, TargetStaging,
+    copy_database_online, copy_regular_file_at, create_private_empty_file,
     expected_migration_checksum, hash_regular_file, open_pending_directory,
-    recover_sqlite_restore_under_lock, replace_with_staged_database, secure_resolve_flags,
-    verify_source_database,
+    recover_sqlite_restore_under_lock_with_verifier, replace_with_staged_database,
+    schema_fingerprint_connection, secure_resolve_flags, sqlite_read_only_uri, sync_directory,
+    verify_current_database, verify_source_database,
 };
 use crate::{RecoveryAction, RecoveryResult};
-
-#[cfg(test)]
-use super::{schema_fingerprint_connection, verify_current_database};
 
 const MIGRATION_0001: &str = include_str!("../../upgrades/sentinel_0_1_to_0_2/0001_init.sql");
 const MIGRATION_0002: &str =
@@ -64,12 +67,22 @@ const MIGRATIONS: [(i64, &str, &str); 3] = [
 const SOURCE_SCHEMA_SHA256: &str =
     "b1c025356eb3ac3f17ff6e94e262dccb05be08d78ef1350670cd6a6c08aca4ea";
 const TARGET_SCHEMA_SHA256: &str =
-    "c06dde59a25ca34d4f64f38f0306822b649efefb6e063f2f964f43e34d014de4";
+    "73a26cfd0d8d55f1559407904fe6445e278310614750cc1c0f3306a2803b7df6";
+const TARGET_SOURCE_COMMIT: &str = "e51a4a90933547c1f95b625635a4430e4632acb9";
+const CREDENTIAL_PRODUCT: &str = "sentinel-monitor";
+const CREDENTIAL_APPLICATION_VERSION: &str = "0.2.0";
+const CREDENTIAL_ENVELOPE_REVISION: u32 = 1;
+const CREDENTIAL_KEY_ID: &str = "sentinel-credentials-0.2.0-key-1";
+const CREDENTIAL_KEY_DERIVATION_SALT: &[u8] = b"sentinel-monitor/0.2.0/credential-envelope/key/v1";
+const CREDENTIAL_KEY_DERIVATION_INFO: &[u8] = b"sentinel-credential-envelope/aes-256-gcm";
+const CREDENTIAL_AAD_DOMAIN: &str = "sentinel-monitor/0.2.0/credential-envelope/aad/v1";
+const MAX_CREDENTIAL_ENVELOPE_BYTES: usize = 64 * 1024;
+const MAX_CREDENTIAL_PLAINTEXT_BYTES: usize = 16 * 1024;
 const CONTRACT_VERSION: &str = "v1.20.0";
 const CONTRACT_PLATFORM: &str = "linux_amd64";
 const CONTRACT_BINARY_SHA256: &str =
     "25947caac403f37ec881c9be213af2cad67e344a6c7098905b0d31c17f40e336";
-const BUNDLE_MANIFEST_VERSION: u32 = 1;
+const BUNDLE_MANIFEST_VERSION: u32 = 2;
 const BUNDLE_MANIFEST_FILE: &str = "manifest.json";
 const BUNDLE_CONFIG_FILE: &str = "mediamtx.yml";
 const BUNDLE_CONTRACT_FILE: &str = "mediamtx.lock";
@@ -140,7 +153,7 @@ impl std::fmt::Debug for SentinelUpgradeOptions {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct SentinelRecoveryOptions {
     pub product: Product,
     pub from_version: String,
@@ -149,6 +162,23 @@ pub struct SentinelRecoveryOptions {
     pub runtime_directory: PathBuf,
     pub recovery_directory: PathBuf,
     pub action: RecoveryAction,
+    pub credentials_key: Option<[u8; 32]>,
+}
+
+impl std::fmt::Debug for SentinelRecoveryOptions {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SentinelRecoveryOptions")
+            .field("product", &self.product)
+            .field("from_version", &self.from_version)
+            .field("to_version", &self.to_version)
+            .field("database", &self.database)
+            .field("runtime_directory", &self.runtime_directory)
+            .field("recovery_directory", &self.recovery_directory)
+            .field("action", &self.action)
+            .field("credentials_key", &"[REDACTED]")
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -176,6 +206,9 @@ pub struct SentinelSourceBackupManifest {
     pub from_version: String,
     pub to_version: String,
     pub source_schema_identity: SchemaIdentity,
+    pub target_schema_identity: SchemaIdentity,
+    pub target_source_commit: String,
+    pub credential_envelope_contract: BTreeMap<String, String>,
     pub created_at_epoch_seconds: u64,
     pub database: SentinelStoredFile,
     pub database_records: BTreeMap<String, u64>,
@@ -220,6 +253,8 @@ struct SentinelDatabaseSummary {
     recording_paths: BTreeSet<String>,
 }
 
+type CredentialInventory = BTreeMap<(Uuid, CredentialField), [u8; 32]>;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct RecordingInventory {
     directories: Vec<String>,
@@ -237,6 +272,266 @@ struct ParsedContract {
     version: String,
     platform: String,
     binary_sha256: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum CredentialField {
+    MainStreamUrl,
+    SubStreamUrl,
+    Username,
+    Password,
+}
+
+impl CredentialField {
+    const ALL: [Self; 4] = [
+        Self::MainStreamUrl,
+        Self::SubStreamUrl,
+        Self::Username,
+        Self::Password,
+    ];
+
+    const fn database_name(self) -> &'static str {
+        match self {
+            Self::MainStreamUrl => "main_stream_url_enc",
+            Self::SubStreamUrl => "sub_stream_url_enc",
+            Self::Username => "username_enc",
+            Self::Password => "password_enc",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct CredentialEnvelope {
+    product: String,
+    application_version: String,
+    envelope_revision: u32,
+    key_id: String,
+    nonce: String,
+    ciphertext: String,
+}
+
+struct CredentialTransformer {
+    legacy: Aes256Gcm,
+    current: Aes256Gcm,
+}
+
+impl CredentialTransformer {
+    fn new(master_key: &[u8; 32]) -> Self {
+        let mut derived = [0_u8; 32];
+        Hkdf::<Sha256>::new(Some(CREDENTIAL_KEY_DERIVATION_SALT), master_key)
+            .expand(CREDENTIAL_KEY_DERIVATION_INFO, &mut derived)
+            .expect("32-byte Sentinel HKDF output is valid");
+        let current = Aes256Gcm::new_from_slice(&derived).expect("32-byte Sentinel derived key");
+        derived.fill(0);
+        Self {
+            legacy: Aes256Gcm::new_from_slice(master_key)
+                .expect("32-byte Sentinel legacy credentials key"),
+            current,
+        }
+    }
+
+    fn decrypt_legacy(&self, encoded: &[u8]) -> anyhow::Result<String> {
+        ensure!(
+            (12 + 16..=12 + 16 + MAX_CREDENTIAL_PLAINTEXT_BYTES).contains(&encoded.len()),
+            "stored Sentinel 0.1 credential is malformed"
+        );
+        let plaintext = self
+            .legacy
+            .decrypt(Nonce::from_slice(&encoded[..12]), &encoded[12..])
+            .map_err(|_| {
+                anyhow::anyhow!("credentials key cannot authenticate Sentinel 0.1 camera data")
+            })?;
+        String::from_utf8(plaintext)
+            .map_err(|_| anyhow::anyhow!("Sentinel 0.1 credential plaintext is not UTF-8"))
+    }
+
+    fn encrypt_current(
+        &self,
+        camera_id: Uuid,
+        field: CredentialField,
+        plaintext: &str,
+    ) -> anyhow::Result<Vec<u8>> {
+        let mut nonce = [0_u8; 12];
+        OsRng.fill_bytes(&mut nonce);
+        self.encrypt_current_with_nonce(camera_id, field, plaintext, nonce)
+    }
+
+    fn encrypt_current_with_nonce(
+        &self,
+        camera_id: Uuid,
+        field: CredentialField,
+        plaintext: &str,
+        nonce: [u8; 12],
+    ) -> anyhow::Result<Vec<u8>> {
+        ensure!(
+            plaintext.len() <= MAX_CREDENTIAL_PLAINTEXT_BYTES,
+            "Sentinel credential exceeds the 0.2 plaintext limit"
+        );
+        let aad = credential_aad(camera_id, field);
+        let ciphertext = self
+            .current
+            .encrypt(
+                Nonce::from_slice(&nonce),
+                Payload {
+                    msg: plaintext.as_bytes(),
+                    aad: &aad,
+                },
+            )
+            .map_err(|_| anyhow::anyhow!("Sentinel 0.2 credential encryption failed"))?;
+        let envelope = CredentialEnvelope {
+            product: CREDENTIAL_PRODUCT.to_owned(),
+            application_version: CREDENTIAL_APPLICATION_VERSION.to_owned(),
+            envelope_revision: CREDENTIAL_ENVELOPE_REVISION,
+            key_id: CREDENTIAL_KEY_ID.to_owned(),
+            nonce: URL_SAFE_NO_PAD.encode(nonce),
+            ciphertext: URL_SAFE_NO_PAD.encode(ciphertext),
+        };
+        let encoded = serde_json::to_vec(&envelope)
+            .map_err(|_| anyhow::anyhow!("Sentinel 0.2 envelope serialization failed"))?;
+        ensure!(
+            encoded.len() <= MAX_CREDENTIAL_ENVELOPE_BYTES,
+            "Sentinel 0.2 credential envelope exceeds its limit"
+        );
+        ensure!(
+            self.decrypt_current(camera_id, field, &encoded)? == plaintext,
+            "Sentinel 0.2 credential envelope self-verification failed"
+        );
+        Ok(encoded)
+    }
+
+    fn decrypt_current(
+        &self,
+        camera_id: Uuid,
+        field: CredentialField,
+        encoded: &[u8],
+    ) -> anyhow::Result<String> {
+        ensure!(
+            !encoded.is_empty() && encoded.len() <= MAX_CREDENTIAL_ENVELOPE_BYTES,
+            "Sentinel credential envelope is not exactly current or authenticated"
+        );
+        let envelope: CredentialEnvelope =
+            serde_json::from_slice(encoded).map_err(|_| malformed_current_credential())?;
+        let canonical =
+            serde_json::to_vec(&envelope).map_err(|_| malformed_current_credential())?;
+        ensure!(
+            canonical == encoded
+                && envelope.product == CREDENTIAL_PRODUCT
+                && envelope.application_version == CREDENTIAL_APPLICATION_VERSION
+                && envelope.envelope_revision == CREDENTIAL_ENVELOPE_REVISION
+                && envelope.key_id == CREDENTIAL_KEY_ID,
+            "Sentinel credential envelope is not exactly current or authenticated"
+        );
+        let nonce = decode_canonical_base64url(&envelope.nonce)?;
+        let nonce: [u8; 12] = nonce
+            .try_into()
+            .map_err(|_| malformed_current_credential())?;
+        let ciphertext = decode_canonical_base64url(&envelope.ciphertext)?;
+        ensure!(
+            (16..=MAX_CREDENTIAL_PLAINTEXT_BYTES + 16).contains(&ciphertext.len()),
+            "Sentinel credential envelope is not exactly current or authenticated"
+        );
+        let aad = credential_aad(camera_id, field);
+        let plaintext = self
+            .current
+            .decrypt(
+                Nonce::from_slice(&nonce),
+                Payload {
+                    msg: &ciphertext,
+                    aad: &aad,
+                },
+            )
+            .map_err(|_| malformed_current_credential())?;
+        String::from_utf8(plaintext).map_err(|_| malformed_current_credential())
+    }
+}
+
+fn malformed_current_credential() -> anyhow::Error {
+    anyhow::anyhow!("Sentinel credential envelope is not exactly current or authenticated")
+}
+
+fn decode_canonical_base64url(encoded: &str) -> anyhow::Result<Vec<u8>> {
+    let decoded = URL_SAFE_NO_PAD
+        .decode(encoded)
+        .map_err(|_| malformed_current_credential())?;
+    ensure!(
+        URL_SAFE_NO_PAD.encode(&decoded) == encoded,
+        "Sentinel credential envelope is not exactly current or authenticated"
+    );
+    Ok(decoded)
+}
+
+fn credential_aad(camera_id: Uuid, field: CredentialField) -> Vec<u8> {
+    let camera_id = camera_id.hyphenated().to_string();
+    let revision = CREDENTIAL_ENVELOPE_REVISION.to_string();
+    let mut aad = Vec::new();
+    for value in [
+        CREDENTIAL_AAD_DOMAIN,
+        CREDENTIAL_PRODUCT,
+        CREDENTIAL_APPLICATION_VERSION,
+        revision.as_str(),
+        CREDENTIAL_KEY_ID,
+        camera_id.as_str(),
+        field.database_name(),
+    ] {
+        aad.extend_from_slice(&(value.len() as u64).to_be_bytes());
+        aad.extend_from_slice(value.as_bytes());
+    }
+    aad
+}
+
+fn credential_envelope_contract() -> BTreeMap<String, String> {
+    BTreeMap::from([
+        ("aad-domain".to_owned(), CREDENTIAL_AAD_DOMAIN.to_owned()),
+        (
+            "aad-fields".to_owned(),
+            CredentialField::ALL
+                .into_iter()
+                .map(CredentialField::database_name)
+                .collect::<Vec<_>>()
+                .join(","),
+        ),
+        (
+            "application-version".to_owned(),
+            CREDENTIAL_APPLICATION_VERSION.to_owned(),
+        ),
+        ("cipher".to_owned(), "AES-256-GCM".to_owned()),
+        (
+            "encoding".to_owned(),
+            "canonical-json+base64url-no-pad".to_owned(),
+        ),
+        (
+            "envelope-revision".to_owned(),
+            CREDENTIAL_ENVELOPE_REVISION.to_string(),
+        ),
+        (
+            "key-derivation-info".to_owned(),
+            String::from_utf8_lossy(CREDENTIAL_KEY_DERIVATION_INFO).into_owned(),
+        ),
+        (
+            "key-derivation-salt".to_owned(),
+            String::from_utf8_lossy(CREDENTIAL_KEY_DERIVATION_SALT).into_owned(),
+        ),
+        ("key-id".to_owned(), CREDENTIAL_KEY_ID.to_owned()),
+        (
+            "max-plaintext-bytes".to_owned(),
+            MAX_CREDENTIAL_PLAINTEXT_BYTES.to_string(),
+        ),
+        ("product".to_owned(), CREDENTIAL_PRODUCT.to_owned()),
+        (
+            "source-format".to_owned(),
+            "aes-256-gcm/raw-nonce12-ciphertext-tag16".to_owned(),
+        ),
+    ])
+}
+
+fn target_schema_identity() -> SchemaIdentity {
+    SchemaIdentity {
+        application: Product::SentinelMonitor.slug().to_owned(),
+        application_version: ADAPTER.to_version.to_owned(),
+        schema_revision: ADAPTER.target_revision,
+        schema_sha256: ADAPTER.target_schema_sha256.to_owned(),
+    }
 }
 
 pub fn sentinel_credentials_key_from_file(path: &Path) -> anyhow::Result<[u8; 32]> {
@@ -320,8 +615,10 @@ fn upgrade_sentinel_with_hook(
     let source_clone = SourceClone::create(&locks.maintenance, options.product)?;
     let source_identity = verify_source_database(&source_clone.database(), ADAPTER)
         .context("verify exact Sentinel 0.1 database contract")?;
-    let source_summary = summarize_database(&source_clone.database())?;
-    verify_credentials(&source_clone.database(), &options.credentials_key)?;
+    let source_summary =
+        summarize_database(&source_clone.database(), SentinelDatabaseContract::Source)?;
+    let source_credentials =
+        inspect_source_credentials(&source_clone.database(), &options.credentials_key)?;
     let external = inspect_external_sources(options, &source_summary)?;
 
     let source_backup = create_composite_backup(
@@ -331,19 +628,27 @@ fn upgrade_sentinel_with_hook(
         &source_summary,
         &external,
     )?;
+    ensure!(
+        inspect_source_credentials(
+            &source_backup.directory.join(DATABASE_FILE),
+            &options.credentials_key,
+        )? == source_credentials,
+        "Sentinel credential plaintext changed while publishing the source backup"
+    );
 
     let staging = TargetStaging::create(&locks.maintenance, options.product)?;
-    let target_identity = create_target_database(
-        ADAPTER,
+    let target_identity = create_sentinel_target_database(
         &source_backup.directory.join(DATABASE_FILE),
         &staging.database(),
+        &options.credentials_key,
+        &source_credentials,
     )?;
-    let target_summary = summarize_database(&staging.database())?;
+    let target_summary = summarize_database(&staging.database(), SentinelDatabaseContract::Target)?;
     ensure!(
         target_summary == source_summary,
         "Sentinel target data summary differs from the verified source"
     );
-    verify_credentials(&staging.database(), &options.credentials_key)?;
+    inspect_current_credentials(&staging.database(), &options.credentials_key)?;
     cross_check_recordings(&target_summary, &external.recordings)?;
     external.ensure_unchanged(options)?;
     source_clone.ensure_source_unchanged()?;
@@ -386,19 +691,21 @@ pub fn recover_sentinel_upgrade(
         &options.runtime_directory,
         options.product,
     )?;
-    let target_identity = SchemaIdentity {
-        application: ADAPTER.product.slug().to_owned(),
-        application_version: ADAPTER.to_version.to_owned(),
-        schema_revision: ADAPTER.target_revision,
-        schema_sha256: ADAPTER.target_schema_sha256.to_owned(),
-    };
-    recover_sqlite_restore_under_lock(
+    let target_identity = target_schema_identity();
+    recover_sqlite_restore_under_lock_with_verifier(
         &options.recovery_directory,
         options.product,
         &options.database,
         &target_identity,
         &locks.maintenance,
         options.action,
+        |candidate| {
+            let credentials_key = options
+                .credentials_key
+                .as_ref()
+                .context("Sentinel recovery commit requires the exact external credentials key")?;
+            verify_sentinel_target_database(candidate, credentials_key).map(|_| ())
+        },
     )
 }
 
@@ -454,21 +761,25 @@ fn verify_ledger(connection: &Connection) -> anyhow::Result<()> {
             "Sentinel 0.1 SQLx migration {version} identity is invalid"
         );
     }
-    validate_database_rows(connection)
+    validate_database_rows(connection, SentinelDatabaseContract::Source)
 }
 
-fn copy_rows(connection: &Connection) -> anyhow::Result<()> {
+fn copy_rows(_connection: &Connection) -> anyhow::Result<()> {
+    anyhow::bail!("Sentinel target creation requires the explicit credentials key")
+}
+
+fn copy_rows_with_credentials(
+    connection: &Connection,
+    credentials_key: &[u8; 32],
+) -> anyhow::Result<()> {
     let transaction = connection.unchecked_transaction()?;
-    transaction.execute("DELETE FROM main.media_reconciler_leases", [])?;
+    copy_table_rows(
+        &transaction,
+        "users",
+        "id,email,password_hash,role,active,last_login_at,created_at,updated_at,session_version",
+    )?;
+    copy_camera_rows(&transaction, credentials_key)?;
     let copies = [
-        (
-            "users",
-            "id,email,password_hash,role,active,last_login_at,created_at,updated_at,session_version",
-        ),
-        (
-            "cameras",
-            "id,name,location,main_stream_url_enc,sub_stream_url_enc,onvif_url,username,password_enc,enabled,record_enabled,status,last_seen_at,created_by,created_at,updated_at,deleted_at",
-        ),
         (
             "events",
             "id,camera_id,kind,severity,message,details,acknowledged_at,acknowledged_by,created_at",
@@ -493,38 +804,215 @@ fn copy_rows(connection: &Connection) -> anyhow::Result<()> {
             "media_actual_paths",
             "path_name,camera_id,profile,present,ready,publisher_active,recording_active,source_digest,source_on_demand,record_configured,applied_generation,last_operation_id,observed_at",
         ),
-        (
-            "media_reconciler_leases",
-            "scope,lease_owner,lease_expires_at,updated_at",
-        ),
     ];
     for (table, columns) in copies {
-        transaction.execute_batch(&format!(
-            "INSERT INTO main.{table} ({columns}) SELECT {columns} FROM legacy.{table};"
-        ))?;
-        let source_rows: i64 =
-            transaction.query_row(&format!("SELECT COUNT(*) FROM legacy.{table}"), [], |row| {
-                row.get(0)
-            })?;
-        let target_rows: i64 =
-            transaction.query_row(&format!("SELECT COUNT(*) FROM main.{table}"), [], |row| {
-                row.get(0)
-            })?;
-        ensure!(
-            source_rows == target_rows,
-            "row-count mismatch while copying Sentinel {table}"
-        );
+        copy_table_rows(&transaction, table, columns)?;
     }
     transaction.commit()?;
-    validate_database_rows(connection)
+    validate_database_rows(connection, SentinelDatabaseContract::Target)
 }
 
-fn summarize_database(path: &Path) -> anyhow::Result<SentinelDatabaseSummary> {
+fn copy_table_rows(
+    transaction: &rusqlite::Transaction<'_>,
+    table: &str,
+    columns: &str,
+) -> anyhow::Result<()> {
+    transaction.execute_batch(&format!(
+        "INSERT INTO main.{table} ({columns}) SELECT {columns} FROM legacy.{table};"
+    ))?;
+    let source_rows: i64 =
+        transaction.query_row(&format!("SELECT COUNT(*) FROM legacy.{table}"), [], |row| {
+            row.get(0)
+        })?;
+    let target_rows: i64 =
+        transaction.query_row(&format!("SELECT COUNT(*) FROM main.{table}"), [], |row| {
+            row.get(0)
+        })?;
+    ensure!(
+        source_rows == target_rows,
+        "row-count mismatch while copying Sentinel {table}"
+    );
+    Ok(())
+}
+
+fn copy_camera_rows(
+    transaction: &rusqlite::Transaction<'_>,
+    credentials_key: &[u8; 32],
+) -> anyhow::Result<()> {
+    let transformer = CredentialTransformer::new(credentials_key);
+    let mut select = transaction.prepare(
+        "SELECT id,name,location,main_stream_url_enc,sub_stream_url_enc,onvif_url,username,\
+                password_enc,enabled,record_enabled,status,last_seen_at,created_by,created_at,\
+                updated_at,deleted_at FROM legacy.cameras ORDER BY id",
+    )?;
+    let mut rows = select.query([])?;
+    let mut copied = 0_i64;
+    while let Some(row) = rows.next()? {
+        let id: String = row.get(0)?;
+        let camera_id = parse_camera_id(&id)?;
+        let main = transformer.decrypt_legacy(&row.get::<_, Vec<u8>>(3)?)?;
+        let sub = row
+            .get::<_, Option<Vec<u8>>>(4)?
+            .map(|value| transformer.decrypt_legacy(&value))
+            .transpose()?;
+        let username = row.get::<_, Option<String>>(6)?;
+        validate_plaintext(username.as_deref())?;
+        let password = row
+            .get::<_, Option<Vec<u8>>>(7)?
+            .map(|value| transformer.decrypt_legacy(&value))
+            .transpose()?;
+        let main = transformer.encrypt_current(camera_id, CredentialField::MainStreamUrl, &main)?;
+        let sub = sub
+            .as_deref()
+            .map(|value| {
+                transformer.encrypt_current(camera_id, CredentialField::SubStreamUrl, value)
+            })
+            .transpose()?;
+        let username = username
+            .as_deref()
+            .map(|value| transformer.encrypt_current(camera_id, CredentialField::Username, value))
+            .transpose()?;
+        let password = password
+            .as_deref()
+            .map(|value| transformer.encrypt_current(camera_id, CredentialField::Password, value))
+            .transpose()?;
+        transaction.execute(
+            "INSERT INTO main.cameras (id,name,location,main_stream_url_enc,sub_stream_url_enc,\
+                 onvif_url,username_enc,password_enc,enabled,record_enabled,status,last_seen_at,\
+                 created_by,created_at,updated_at,deleted_at)\
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+            rusqlite::params![
+                id,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                main,
+                sub,
+                row.get::<_, Option<String>>(5)?,
+                username,
+                password,
+                row.get::<_, i64>(8)?,
+                row.get::<_, i64>(9)?,
+                row.get::<_, String>(10)?,
+                row.get::<_, Option<String>>(11)?,
+                row.get::<_, Option<String>>(12)?,
+                row.get::<_, String>(13)?,
+                row.get::<_, String>(14)?,
+                row.get::<_, Option<String>>(15)?,
+            ],
+        )?;
+        copied += 1;
+    }
+    let source_rows: i64 =
+        transaction.query_row("SELECT COUNT(*) FROM legacy.cameras", [], |row| row.get(0))?;
+    let target_rows: i64 =
+        transaction.query_row("SELECT COUNT(*) FROM main.cameras", [], |row| row.get(0))?;
+    ensure!(
+        copied == source_rows && target_rows == source_rows,
+        "row-count mismatch while transforming Sentinel cameras"
+    );
+    Ok(())
+}
+
+fn create_sentinel_target_database(
+    source_backup: &Path,
+    target: &Path,
+    credentials_key: &[u8; 32],
+    expected_credentials: &CredentialInventory,
+) -> anyhow::Result<SchemaIdentity> {
+    create_private_empty_file(target)?;
+    let connection = Connection::open_with_flags(
+        target,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    connection.busy_timeout(Duration::from_secs(3))?;
+    connection.pragma_update(None, "trusted_schema", "OFF")?;
+    connection.pragma_update(None, "foreign_keys", "ON")?;
+    connection.pragma_update(None, "journal_mode", "DELETE")?;
+    connection.pragma_update(None, "synchronous", "FULL")?;
+    connection.execute_batch(TARGET_SCHEMA_SQL)?;
+    connection.execute_batch(PRODUCT_METADATA_DDL)?;
+    let fingerprint = schema_fingerprint_connection(&connection)?;
+    ensure!(
+        fingerprint == TARGET_SCHEMA_SHA256,
+        "embedded Sentinel target schema does not match the pinned product contract"
+    );
+    connection.execute(
+        "INSERT INTO product_metadata (singleton,application,application_version,\
+             schema_revision,schema_sha256) VALUES (1,?1,?2,?3,?4)",
+        rusqlite::params![
+            Product::SentinelMonitor.slug(),
+            ADAPTER.to_version,
+            i64::try_from(ADAPTER.target_revision)?,
+            TARGET_SCHEMA_SHA256,
+        ],
+    )?;
+    let source_uri = sqlite_read_only_uri(source_backup)?;
+    connection.execute("ATTACH DATABASE ?1 AS legacy", [source_uri])?;
+    let copy = copy_rows_with_credentials(&connection, credentials_key);
+    let detach = connection.execute_batch("DETACH DATABASE legacy;");
+    copy?;
+    detach?;
+    let integrity: String = connection.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
+    ensure!(
+        integrity.eq_ignore_ascii_case("ok"),
+        "Sentinel target SQLite integrity check failed"
+    );
+    let mut foreign_keys = connection.prepare("PRAGMA foreign_key_check")?;
+    ensure!(
+        foreign_keys.query([])?.next()?.is_none(),
+        "Sentinel target SQLite foreign-key check failed"
+    );
+    drop(foreign_keys);
+    connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+    drop(connection);
+    File::open(target)?.sync_all()?;
+    sync_directory(
+        target
+            .parent()
+            .context("Sentinel target database has no parent")?,
+    )?;
+    let identity = verify_sentinel_target_database(target, credentials_key)?;
+    ensure!(
+        inspect_current_credentials(target, credentials_key)? == *expected_credentials,
+        "Sentinel credential plaintext changed during the exact 0.2 envelope conversion"
+    );
+    Ok(identity)
+}
+
+fn verify_sentinel_target_database(
+    target: &Path,
+    credentials_key: &[u8; 32],
+) -> anyhow::Result<SchemaIdentity> {
+    let identity = verify_current_database(target, Product::SentinelMonitor)?;
+    ensure!(
+        identity == target_schema_identity(),
+        "Sentinel target database identity is not the pinned current product contract"
+    );
+    let connection = Connection::open_with_flags(
+        target,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    validate_database_rows(&connection, SentinelDatabaseContract::Target)?;
+    drop(connection);
+    inspect_current_credentials(target, credentials_key)?;
+    Ok(identity)
+}
+
+#[derive(Clone, Copy)]
+enum SentinelDatabaseContract {
+    Source,
+    Target,
+}
+
+fn summarize_database(
+    path: &Path,
+    contract: SentinelDatabaseContract,
+) -> anyhow::Result<SentinelDatabaseSummary> {
     let connection = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
-    validate_database_rows(&connection)?;
+    validate_database_rows(&connection, contract)?;
     let mut records = BTreeMap::new();
     for table in DATA_TABLES {
         let count: i64 =
@@ -562,7 +1050,10 @@ fn summarize_database(path: &Path) -> anyhow::Result<SentinelDatabaseSummary> {
     })
 }
 
-fn validate_database_rows(connection: &Connection) -> anyhow::Result<()> {
+fn validate_database_rows(
+    connection: &Connection,
+    contract: SentinelDatabaseContract,
+) -> anyhow::Result<()> {
     let invalid_json: i64 = connection.query_row(
         "SELECT
            (SELECT COUNT(*) FROM events WHERE json_valid(details) <> 1) +
@@ -676,19 +1167,39 @@ fn validate_database_rows(connection: &Connection) -> anyhow::Result<()> {
         "Sentinel actual media state is invalid"
     );
 
-    let invalid_leases: i64 = connection.query_row(
-        "SELECT COUNT(*) FROM media_reconciler_leases
-          WHERE scope <> 'global'
-             OR ((lease_owner IS NULL) <> (lease_expires_at IS NULL))
-             OR (lease_expires_at IS NOT NULL AND datetime(lease_expires_at) IS NULL)
-             OR datetime(updated_at) IS NULL",
-        [],
-        |row| row.get(0),
-    )?;
-    ensure!(
-        invalid_leases == 0,
-        "Sentinel global reconciler lease is invalid"
-    );
+    match contract {
+        SentinelDatabaseContract::Source => {
+            let invalid_leases: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM media_reconciler_leases
+                  WHERE scope <> 'global'
+                     OR ((lease_owner IS NULL) <> (lease_expires_at IS NULL))
+                     OR (lease_expires_at IS NOT NULL AND datetime(lease_expires_at) IS NULL)
+                     OR datetime(updated_at) IS NULL",
+                [],
+                |row| row.get(0),
+            )?;
+            ensure!(
+                invalid_leases == 0,
+                "Sentinel 0.1 global reconciler lease is invalid"
+            );
+        }
+        SentinelDatabaseContract::Target => {
+            let exact_reset_lease: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM media_reconciler_leases
+                  WHERE typeof(singleton)='integer' AND singleton=1
+                    AND typeof(lease_owner)='null' AND lease_owner IS NULL
+                    AND typeof(lease_expires_at)='null' AND lease_expires_at IS NULL
+                    AND typeof(updated_at)='text'
+                    AND updated_at='1970-01-01T00:00:00+00:00'",
+                [],
+                |row| row.get(0),
+            )?;
+            ensure!(
+                exact_reset_lease == 1,
+                "Sentinel 0.2 global reconciler lease is not the exact reset state"
+            );
+        }
+    }
     let lease_rows: i64 =
         connection.query_row("SELECT COUNT(*) FROM media_reconciler_leases", [], |row| {
             row.get(0)
@@ -700,37 +1211,125 @@ fn validate_database_rows(connection: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn verify_credentials(path: &Path, key: &[u8; 32]) -> anyhow::Result<()> {
+fn inspect_source_credentials(path: &Path, key: &[u8; 32]) -> anyhow::Result<CredentialInventory> {
     let connection = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
-    let cipher = Aes256Gcm::new_from_slice(key).expect("32-byte credentials key");
+    let transformer = CredentialTransformer::new(key);
     let mut statement = connection.prepare(
-        "SELECT main_stream_url_enc,sub_stream_url_enc,password_enc FROM cameras ORDER BY id",
+        "SELECT id,main_stream_url_enc,sub_stream_url_enc,username,password_enc \
+         FROM cameras ORDER BY id",
     )?;
     let mut rows = statement.query([])?;
+    let mut inventory = CredentialInventory::new();
     while let Some(row) = rows.next()? {
-        decrypt_credential(&cipher, &row.get::<_, Vec<u8>>(0)?)?;
-        if let Some(value) = row.get::<_, Option<Vec<u8>>>(1)? {
-            decrypt_credential(&cipher, &value)?;
+        let camera_id = parse_camera_id(&row.get::<_, String>(0)?)?;
+        let main = transformer.decrypt_legacy(&row.get::<_, Vec<u8>>(1)?)?;
+        insert_credential_digest(
+            &mut inventory,
+            camera_id,
+            CredentialField::MainStreamUrl,
+            &main,
+        )?;
+        let sub = row
+            .get::<_, Option<Vec<u8>>>(2)?
+            .map(|value| transformer.decrypt_legacy(&value))
+            .transpose()?;
+        if let Some(sub) = sub.as_deref() {
+            insert_credential_digest(
+                &mut inventory,
+                camera_id,
+                CredentialField::SubStreamUrl,
+                sub,
+            )?;
         }
-        if let Some(value) = row.get::<_, Option<Vec<u8>>>(2)? {
-            decrypt_credential(&cipher, &value)?;
+        let username = row.get::<_, Option<String>>(3)?;
+        validate_plaintext(username.as_deref())?;
+        if let Some(username) = username.as_deref() {
+            insert_credential_digest(
+                &mut inventory,
+                camera_id,
+                CredentialField::Username,
+                username,
+            )?;
+        }
+        let password = row
+            .get::<_, Option<Vec<u8>>>(4)?
+            .map(|value| transformer.decrypt_legacy(&value))
+            .transpose()?;
+        if let Some(password) = password.as_deref() {
+            insert_credential_digest(
+                &mut inventory,
+                camera_id,
+                CredentialField::Password,
+                password,
+            )?;
         }
     }
+    Ok(inventory)
+}
+
+fn inspect_current_credentials(path: &Path, key: &[u8; 32]) -> anyhow::Result<CredentialInventory> {
+    let connection = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    let transformer = CredentialTransformer::new(key);
+    let mut statement = connection.prepare(
+        "SELECT id,main_stream_url_enc,sub_stream_url_enc,username_enc,password_enc \
+         FROM cameras ORDER BY id",
+    )?;
+    let mut rows = statement.query([])?;
+    let mut inventory = CredentialInventory::new();
+    while let Some(row) = rows.next()? {
+        let camera_id = parse_camera_id(&row.get::<_, String>(0)?)?;
+        for (index, field) in CredentialField::ALL.into_iter().enumerate() {
+            let encoded = if field == CredentialField::MainStreamUrl {
+                Some(row.get::<_, Vec<u8>>(index + 1)?)
+            } else {
+                row.get::<_, Option<Vec<u8>>>(index + 1)?
+            };
+            if let Some(encoded) = encoded {
+                let plaintext = transformer.decrypt_current(camera_id, field, &encoded)?;
+                insert_credential_digest(&mut inventory, camera_id, field, &plaintext)?;
+            }
+        }
+    }
+    Ok(inventory)
+}
+
+fn parse_camera_id(value: &str) -> anyhow::Result<Uuid> {
+    Uuid::parse_str(value).map_err(|_| anyhow::anyhow!("stored Sentinel camera ID is malformed"))
+}
+
+fn validate_plaintext(value: Option<&str>) -> anyhow::Result<()> {
+    ensure!(
+        value.is_none_or(|value| value.len() <= MAX_CREDENTIAL_PLAINTEXT_BYTES),
+        "Sentinel credential exceeds the 0.2 plaintext limit"
+    );
     Ok(())
 }
 
-fn decrypt_credential(cipher: &Aes256Gcm, encoded: &[u8]) -> anyhow::Result<()> {
+fn insert_credential_digest(
+    inventory: &mut CredentialInventory,
+    camera_id: Uuid,
+    field: CredentialField,
+    plaintext: &str,
+) -> anyhow::Result<()> {
+    validate_plaintext(Some(plaintext))?;
+    let mut digest = Sha256::new();
+    digest.update(b"sentinel-upgrade-credential-plaintext-v1\0");
+    digest.update((field.database_name().len() as u64).to_be_bytes());
+    digest.update(field.database_name().as_bytes());
+    digest.update((plaintext.len() as u64).to_be_bytes());
+    digest.update(plaintext.as_bytes());
     ensure!(
-        encoded.len() >= 13,
-        "stored Sentinel credential is malformed"
+        inventory
+            .insert((camera_id, field), digest.finalize().into())
+            .is_none(),
+        "Sentinel credential inventory contains a duplicate field"
     );
-    let plaintext = cipher
-        .decrypt(Nonce::from_slice(&encoded[..12]), &encoded[12..])
-        .map_err(|_| anyhow::anyhow!("credentials key cannot decrypt Sentinel camera data"))?;
-    String::from_utf8(plaintext).context("decrypted Sentinel credential is not UTF-8")?;
     Ok(())
 }
 
@@ -851,12 +1450,12 @@ fn create_composite_backup(
         &snapshot_identity == source_identity,
         "Sentinel database identity changed while its backup was created"
     );
-    let snapshot_summary = summarize_database(&database_output)?;
+    let snapshot_summary = summarize_database(&database_output, SentinelDatabaseContract::Source)?;
     ensure!(
         &snapshot_summary == source_summary,
         "Sentinel database data changed while its backup was created"
     );
-    verify_credentials(&database_output, &options.credentials_key)?;
+    inspect_source_credentials(&database_output, &options.credentials_key)?;
 
     let source_config = SecureFile::open(&options.mediamtx_config, "MediaMTX config")?;
     let source_contract = SecureFile::open(&options.mediamtx_contract, "MediaMTX contract")?;
@@ -915,6 +1514,9 @@ fn create_composite_backup(
         from_version: options.from_version.clone(),
         to_version: options.to_version.clone(),
         source_schema_identity: snapshot_identity,
+        target_schema_identity: target_schema_identity(),
+        target_source_commit: TARGET_SOURCE_COMMIT.to_owned(),
+        credential_envelope_contract: credential_envelope_contract(),
         created_at_epoch_seconds: SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .context("system clock is before the Unix epoch")?
@@ -988,12 +1590,12 @@ pub fn verify_sentinel_source_backup(
         identity == manifest.source_schema_identity,
         "Sentinel source backup schema identity mismatch"
     );
-    let summary = summarize_database(&database_path)?;
+    let summary = summarize_database(&database_path, SentinelDatabaseContract::Source)?;
     ensure!(
         summary.records == manifest.database_records,
         "Sentinel source backup table counts mismatch"
     );
-    verify_credentials(&database_path, credentials_key)?;
+    inspect_source_credentials(&database_path, credentials_key)?;
 
     let config_file = SecureFile::from_directory(
         &root,
@@ -1055,6 +1657,12 @@ fn validate_manifest(manifest: &SentinelSourceBackupManifest) -> anyhow::Result<
             && manifest.source_schema_identity.schema_revision == ADAPTER.source_revision
             && manifest.source_schema_identity.schema_sha256 == ADAPTER.source_schema_sha256,
         "Sentinel source backup has the wrong database identity"
+    );
+    ensure!(
+        manifest.target_schema_identity == target_schema_identity()
+            && manifest.target_source_commit == TARGET_SOURCE_COMMIT
+            && manifest.credential_envelope_contract == credential_envelope_contract(),
+        "Sentinel source backup has the wrong pinned 0.2 target contract"
     );
     ensure!(
         manifest.database.path == DATABASE_FILE
@@ -1923,6 +2531,7 @@ mod tests {
                 database: self.database.clone(),
                 runtime_directory: self.runtime.clone(),
                 recovery_directory: recovery,
+                credentials_key: Some(TEST_KEY),
                 action,
             }
         }
@@ -1960,8 +2569,10 @@ mod tests {
         )?;
         connection.execute(
             "INSERT INTO cameras (
-               id,name,main_stream_url_enc,sub_stream_url_enc,password_enc,created_by,created_at,updated_at
-             ) VALUES (?1,'fixture',?2,?3,?4,'11111111-1111-4111-8111-111111111111',?5,?5)",
+               id,name,main_stream_url_enc,sub_stream_url_enc,username,password_enc,
+               created_by,created_at,updated_at
+             ) VALUES (?1,'fixture',?2,?3,'camera-user',?4,
+                       '11111111-1111-4111-8111-111111111111',?5,?5)",
             rusqlite::params![CAMERA_ID, main, sub, password, "2026-01-01T00:00:00Z"],
         )?;
         connection.execute(
@@ -1988,6 +2599,14 @@ mod tests {
             ),
         )?;
         apply_migration(&connection, MIGRATIONS[2])?;
+        connection.execute(
+            "UPDATE media_reconciler_leases
+                SET lease_owner='legacy-reconciler',
+                    lease_expires_at='2030-01-01T00:01:00Z',
+                    updated_at='2030-01-01T00:00:00Z'
+              WHERE scope='global'",
+            [],
+        )?;
         let operation_id: String = connection.query_row(
             "SELECT id FROM media_operations WHERE camera_id=?1",
             [CAMERA_ID],
@@ -2100,6 +2719,28 @@ mod tests {
             backup.manifest.credentials_key_sha256,
             credentials_key_sha256(&TEST_KEY)
         );
+        assert_eq!(
+            backup.manifest.target_schema_identity,
+            target_schema_identity()
+        );
+        assert_eq!(backup.manifest.target_source_commit, TARGET_SOURCE_COMMIT);
+        assert_eq!(
+            backup.manifest.credential_envelope_contract,
+            credential_envelope_contract()
+        );
+        let manifest_bytes = fs::read(options.backup_output.join(BUNDLE_MANIFEST_FILE)).unwrap();
+        for secret in [
+            b"camera-user".as_slice(),
+            b"camera-password".as_slice(),
+            b"rtsp://camera/main".as_slice(),
+            b"rtsp://camera/sub".as_slice(),
+        ] {
+            assert!(
+                !manifest_bytes
+                    .windows(secret.len())
+                    .any(|value| value == secret)
+            );
+        }
         assert!(
             verify_sentinel_source_backup(
                 Product::SentinelMonitor,
@@ -2124,7 +2765,63 @@ mod tests {
         );
         let identity = verify_current_database(&layout.database, Product::SentinelMonitor).unwrap();
         assert_eq!(identity.schema_sha256, TARGET_SCHEMA_SHA256);
-        let current = summarize_database(&layout.database).unwrap();
+        let target_bytes = fs::read(&layout.database).unwrap();
+        assert!(
+            !target_bytes
+                .windows(b"camera-user".len())
+                .any(|value| value == b"camera-user")
+        );
+        let current_credentials = inspect_current_credentials(&layout.database, &TEST_KEY).unwrap();
+        assert_eq!(current_credentials.len(), 4);
+        let connection = Connection::open(&layout.database).unwrap();
+        let transformed: (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) = connection
+            .query_row(
+                "SELECT main_stream_url_enc,sub_stream_url_enc,username_enc,password_enc
+                   FROM cameras WHERE id=?1",
+                [CAMERA_ID],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        let camera_id = Uuid::parse_str(CAMERA_ID).unwrap();
+        let transformer = CredentialTransformer::new(&TEST_KEY);
+        for (encoded, field, plaintext) in [
+            (
+                transformed.0,
+                CredentialField::MainStreamUrl,
+                "rtsp://camera/main",
+            ),
+            (
+                transformed.1,
+                CredentialField::SubStreamUrl,
+                "rtsp://camera/sub",
+            ),
+            (transformed.2, CredentialField::Username, "camera-user"),
+            (transformed.3, CredentialField::Password, "camera-password"),
+        ] {
+            assert_eq!(
+                transformer
+                    .decrypt_current(camera_id, field, &encoded)
+                    .unwrap(),
+                plaintext
+            );
+            let envelope: CredentialEnvelope = serde_json::from_slice(&encoded).unwrap();
+            assert_eq!(serde_json::to_vec(&envelope).unwrap(), encoded);
+        }
+        let lease: (i64, Option<String>, Option<String>, String) = connection
+            .query_row(
+                "SELECT singleton,lease_owner,lease_expires_at,updated_at
+                   FROM media_reconciler_leases",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            lease,
+            (1, None, None, "1970-01-01T00:00:00+00:00".to_owned())
+        );
+        drop(connection);
+        let current =
+            summarize_database(&layout.database, SentinelDatabaseContract::Target).unwrap();
         assert!(current.records.values().all(|count| *count == 1));
         let ledger: i64 = Connection::open(&layout.database)
             .unwrap()
@@ -2160,6 +2857,109 @@ mod tests {
         assert!(upgrade_sentinel(&options).is_err());
         assert_eq!(source_bytes(&layout), tampered);
         assert!(!options.backup_output.exists());
+    }
+
+    #[test]
+    fn current_envelopes_are_canonical_and_bound_to_key_camera_and_field() {
+        let transformer = CredentialTransformer::new(&TEST_KEY);
+        let camera = Uuid::parse_str(CAMERA_ID).unwrap();
+        let other_camera = Uuid::parse_str("66666666-6666-4666-8666-666666666666").unwrap();
+        let secret = "rtsp://operator:do-not-disclose@camera.invalid/main";
+        let encoded = transformer
+            .encrypt_current(camera, CredentialField::Username, secret)
+            .unwrap();
+        let envelope: CredentialEnvelope = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(envelope.product, CREDENTIAL_PRODUCT);
+        assert_eq!(envelope.application_version, CREDENTIAL_APPLICATION_VERSION);
+        assert_eq!(envelope.envelope_revision, CREDENTIAL_ENVELOPE_REVISION);
+        assert_eq!(envelope.key_id, CREDENTIAL_KEY_ID);
+        assert_eq!(serde_json::to_vec(&envelope).unwrap(), encoded);
+        assert_eq!(
+            transformer
+                .decrypt_current(camera, CredentialField::Username, &encoded)
+                .unwrap(),
+            secret
+        );
+
+        for result in [
+            transformer.decrypt_current(other_camera, CredentialField::Username, &encoded),
+            transformer.decrypt_current(camera, CredentialField::MainStreamUrl, &encoded),
+            transformer.decrypt_current(camera, CredentialField::SubStreamUrl, &encoded),
+            transformer.decrypt_current(camera, CredentialField::Password, &encoded),
+            CredentialTransformer::new(&[8; 32]).decrypt_current(
+                camera,
+                CredentialField::Username,
+                &encoded,
+            ),
+            transformer.decrypt_current(
+                camera,
+                CredentialField::Username,
+                &encrypt_for_test(&TEST_KEY, 9, secret),
+            ),
+        ] {
+            let error = result.unwrap_err();
+            assert!(!format!("{error:#}").contains(secret));
+        }
+    }
+
+    #[test]
+    fn current_envelope_matches_the_committed_product_crypto_golden() {
+        let transformer = CredentialTransformer::new(&[0x42; 32]);
+        let camera = Uuid::parse_str(CAMERA_ID).unwrap();
+        let encoded = transformer
+            .encrypt_current_with_nonce(
+                camera,
+                CredentialField::Username,
+                "camera-user",
+                [0x11; 12],
+            )
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(encoded).unwrap(),
+            "{\"product\":\"sentinel-monitor\",\"application_version\":\"0.2.0\",\"envelope_revision\":1,\"key_id\":\"sentinel-credentials-0.2.0-key-1\",\"nonce\":\"ERERERERERERERER\",\"ciphertext\":\"x6J1PX8jV3wvKpChAvYCo2olp7c0Ip1yAVIZ\"}"
+        );
+    }
+
+    #[test]
+    fn nullable_username_remains_absent_in_the_unique_target() {
+        let layout = TestLayout::new();
+        Connection::open(&layout.database)
+            .unwrap()
+            .execute("UPDATE cameras SET username=NULL WHERE id=?1", [CAMERA_ID])
+            .unwrap();
+        let options = layout.options("anonymous-backup");
+        upgrade_sentinel(&options).unwrap();
+        let username: Option<Vec<u8>> = Connection::open(&layout.database)
+            .unwrap()
+            .query_row(
+                "SELECT username_enc FROM cameras WHERE id=?1",
+                [CAMERA_ID],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(username.is_none());
+        assert_eq!(
+            inspect_current_credentials(&layout.database, &TEST_KEY)
+                .unwrap()
+                .len(),
+            3
+        );
+    }
+
+    #[test]
+    fn target_verifier_rejects_wrong_key_and_cross_field_envelope_tampering() {
+        let layout = TestLayout::new();
+        upgrade_sentinel(&layout.options("target-tamper-backup")).unwrap();
+        assert!(verify_sentinel_target_database(&layout.database, &[8; 32]).is_err());
+
+        Connection::open(&layout.database)
+            .unwrap()
+            .execute(
+                "UPDATE cameras SET password_enc=username_enc WHERE id=?1",
+                [CAMERA_ID],
+            )
+            .unwrap();
+        assert!(verify_sentinel_target_database(&layout.database, &TEST_KEY).is_err());
     }
 
     #[test]
@@ -2314,6 +3114,43 @@ mod tests {
             )
             .is_err()
         );
+
+        let mut manifest: serde_json::Value = serde_json::from_slice(&original_manifest).unwrap();
+        manifest["target_source_commit"] = serde_json::json!("unofficial-target");
+        fs::write(
+            &manifest_path,
+            serde_json::to_vec_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            verify_sentinel_source_backup(
+                Product::SentinelMonitor,
+                "0.1.0",
+                "0.2.0",
+                &options.backup_output,
+                &TEST_KEY,
+            )
+            .is_err()
+        );
+
+        let mut manifest: serde_json::Value = serde_json::from_slice(&original_manifest).unwrap();
+        manifest["credential_envelope_contract"]["key-id"] =
+            serde_json::json!("sentinel-credentials-unofficial");
+        fs::write(
+            &manifest_path,
+            serde_json::to_vec_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            verify_sentinel_source_backup(
+                Product::SentinelMonitor,
+                "0.1.0",
+                "0.2.0",
+                &options.backup_output,
+                &TEST_KEY,
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -2347,38 +3184,76 @@ mod tests {
 
     #[test]
     fn interrupted_composite_upgrade_commits_or_rolls_back_under_all_locks() {
-        for action in [RecoveryAction::Rollback, RecoveryAction::Commit] {
-            let layout = TestLayout::new();
-            let before = source_bytes(&layout);
-            let options = layout.options("backup");
-            let result = upgrade_sentinel_with_hook(&options, |point| {
-                if matches!(point, RestorePoint::Installed) {
-                    anyhow::bail!("injected Sentinel interruption")
+        for interruption in [
+            RestorePoint::OriginalsPreserved,
+            RestorePoint::Installed,
+            RestorePoint::Verified,
+        ] {
+            for action in [RecoveryAction::Rollback, RecoveryAction::Commit] {
+                let layout = TestLayout::new();
+                let before = source_bytes(&layout);
+                let options = layout.options("backup");
+                let result = upgrade_sentinel_with_hook(&options, |point| {
+                    if std::mem::discriminant(&point) == std::mem::discriminant(&interruption) {
+                        anyhow::bail!("injected Sentinel interruption")
+                    }
+                    Ok(())
+                });
+                assert!(result.is_err());
+                let recovery = recovery_directory(&layout);
+                let mut recovery_options = layout.recovery_options(recovery.clone(), action);
+                if action == RecoveryAction::Rollback {
+                    recovery_options.credentials_key = None;
                 }
-                Ok(())
-            });
-            assert!(result.is_err());
-            let recovery = recovery_directory(&layout);
-            recover_sentinel_upgrade(&layout.recovery_options(recovery.clone(), action)).unwrap();
-            assert!(!recovery.exists());
-            assert_eq!(source_bytes(&layout).get("config"), before.get("config"));
-            assert_eq!(
-                source_bytes(&layout).get("contract"),
-                before.get("contract")
-            );
-            assert_eq!(
-                source_bytes(&layout).get("recording"),
-                before.get("recording")
-            );
-            if action == RecoveryAction::Rollback {
-                assert_eq!(fs::read(&layout.database).unwrap(), before["database"]);
-                verify_source_database(&layout.database, ADAPTER).unwrap();
-            } else {
-                let identity =
-                    verify_current_database(&layout.database, Product::SentinelMonitor).unwrap();
-                assert_eq!(identity.application_version, "0.2.0");
+                recover_sentinel_upgrade(&recovery_options).unwrap();
+                assert!(!recovery.exists());
+                assert_eq!(source_bytes(&layout).get("config"), before.get("config"));
+                assert_eq!(
+                    source_bytes(&layout).get("contract"),
+                    before.get("contract")
+                );
+                assert_eq!(
+                    source_bytes(&layout).get("recording"),
+                    before.get("recording")
+                );
+                if action == RecoveryAction::Rollback {
+                    assert_eq!(fs::read(&layout.database).unwrap(), before["database"]);
+                    verify_source_database(&layout.database, ADAPTER).unwrap();
+                } else {
+                    let identity =
+                        verify_sentinel_target_database(&layout.database, &TEST_KEY).unwrap();
+                    assert_eq!(identity.application_version, "0.2.0");
+                }
             }
         }
+    }
+
+    #[test]
+    fn interrupted_commit_rejects_wrong_key_before_mutating_recovery_state() {
+        let layout = TestLayout::new();
+        let options = layout.options("wrong-recovery-key-backup");
+        let result = upgrade_sentinel_with_hook(&options, |point| {
+            if matches!(point, RestorePoint::Installed) {
+                anyhow::bail!("injected Sentinel interruption")
+            }
+            Ok(())
+        });
+        assert!(result.is_err());
+        let recovery = recovery_directory(&layout);
+        let destination_before = fs::read(&layout.database).unwrap();
+        let mut wrong = layout.recovery_options(recovery.clone(), RecoveryAction::Commit);
+        wrong.credentials_key = Some([8; 32]);
+        let error = recover_sentinel_upgrade(&wrong).unwrap_err();
+        assert!(recovery.exists());
+        assert_eq!(fs::read(&layout.database).unwrap(), destination_before);
+        assert!(!format!("{wrong:?}{error:#}").contains(&STANDARD.encode([8; 32])));
+
+        recover_sentinel_upgrade(
+            &layout.recovery_options(recovery.clone(), RecoveryAction::Commit),
+        )
+        .unwrap();
+        assert!(!recovery.exists());
+        verify_sentinel_target_database(&layout.database, &TEST_KEY).unwrap();
     }
 
     #[test]

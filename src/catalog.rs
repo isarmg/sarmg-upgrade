@@ -41,11 +41,13 @@ impl Product {
                 product: self,
                 resources: &[ResourceKind::Sqlite, ResourceKind::DataTree],
                 has_runtime_state: true,
+                requires_external_credentials_key: false,
             },
             Self::HostMonitoring | Self::SunshineManager => ProductContract {
                 product: self,
                 resources: &[ResourceKind::Sqlite],
                 has_runtime_state: true,
+                requires_external_credentials_key: false,
             },
             Self::SentinelMonitor => ProductContract {
                 product: self,
@@ -56,6 +58,7 @@ impl Product {
                     ResourceKind::Recordings,
                 ],
                 has_runtime_state: true,
+                requires_external_credentials_key: true,
             },
             Self::DufsRam => ProductContract {
                 product: self,
@@ -65,6 +68,7 @@ impl Product {
                     ResourceKind::Configuration,
                 ],
                 has_runtime_state: true,
+                requires_external_credentials_key: false,
             },
             // Foundation is a library repository. It participates in source/API
             // upgrades, but has no service state to back up or restore.
@@ -72,6 +76,7 @@ impl Product {
                 product: self,
                 resources: &[],
                 has_runtime_state: false,
+                requires_external_credentials_key: false,
             },
         }
     }
@@ -113,6 +118,7 @@ pub struct ProductContract {
     pub product: Product,
     pub resources: &'static [ResourceKind],
     pub has_runtime_state: bool,
+    pub requires_external_credentials_key: bool,
 }
 
 #[cfg(test)]
@@ -131,5 +137,15 @@ mod tests {
         let contract = Product::IsarmgFoundation.contract();
         assert!(!contract.has_runtime_state);
         assert!(contract.resources.is_empty());
+        assert!(!contract.requires_external_credentials_key);
+    }
+
+    #[test]
+    fn sentinel_declares_its_external_credentials_key_requirement() {
+        assert!(
+            Product::SentinelMonitor
+                .contract()
+                .requires_external_credentials_key
+        );
     }
 }

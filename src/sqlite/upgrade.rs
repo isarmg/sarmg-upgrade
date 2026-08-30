@@ -20,7 +20,9 @@ use sha2::{Digest, Sha384};
 use super::{
     DATABASE_FILE, MANIFEST_FILE, MAX_MANIFEST_BYTES, MaintenanceLock, PRODUCT_METADATA_DDL,
     PendingDirectory, SecureDirectory, copy_database_online, hash_regular_file, open_read_only,
-    restore::{RestorePoint, recover_sqlite_restore_under_lock, replace_with_staged_database},
+    restore::{
+        RestorePoint, recover_sqlite_restore_under_lock_with_verifier, replace_with_staged_database,
+    },
     schema_fingerprint_connection, secure_resolve_flags, sync_directory, verify_current_database,
     write_manifest,
 };

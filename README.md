@@ -104,12 +104,25 @@ directory, and copy every table through explicit column lists. They do not run
 The Sentinel adapter obtains the database maintenance, Sentinel runtime, and
 MediaMTX locks in that order. Its immutable backup contains the old SQLite
 database, exact MediaMTX config and companion contract, and every recording
-file and empty directory with a checksummed inventory. The credentials key is
-required only to prove that every encrypted camera value is decryptable; its
-file must grant no group or other access, and the key is never copied into the
-backup, journal, manifest, or command output. The manifest stores only its
-non-secret SHA-256 identifier so verification and future restore can require
-the exact external key.
+file and empty directory with a checksummed inventory. The target is pinned to
+Sentinel commit `e51a4a90933547c1f95b625635a4430e4632acb9`, revision `1`, and
+schema SHA-256
+`73a26cfd0d8d55f1559407904fe6445e278310614750cc1c0f3306a2803b7df6`.
+It creates that schema from scratch, resets the transient global reconciler
+lease to the target's canonical free state, and converts all present main URL,
+sub URL, username, and password values directly from the 0.1 raw AES-GCM form
+to the sole 0.2 canonical JSON envelope. The new envelope derives its AES-GCM
+key with the pinned HKDF-SHA256 domains and authenticates the camera UUID plus
+the exact destination field in AAD; anonymous cameras retain a null
+`username_enc`. No old envelope or fallback representation is copied.
+
+The credentials key file must grant no group or other access. The key is used
+to authenticate the old values, construct the exact target envelopes, and
+verify recovery commits, but is never copied into the backup, journal,
+manifest, or command output. The manifest stores only its non-secret SHA-256
+identifier plus the pinned target/envelope contract so verification and future
+restore can require the exact external key.
+
 MediaMTX resources do not change between these two versions, so the journaled
 switch mutates only the database after confirming that config, contract, and
 recordings remain byte-identical. Resolve an interrupted switch while both
@@ -120,8 +133,12 @@ isarmg-upgrade recover-sentinel-upgrade --product sentinel-monitor \\
   --from-version 0.1.0 --to-version 0.2.0 \\
   --database /var/lib/isarmg/sentinel-monitor/app.sqlite3 \\
   --runtime-directory /run/isarmg/sentinel-monitor \\
+  --credentials-key-file /run/credentials/sentinel.key \\
   --recovery /path/from/error --action commit
 ```
+
+`commit` requires the key file so every incoming envelope is authenticated
+before mutation; `rollback` restores the preserved 0.1 bytes and may omit it.
 
 The Dufs adapter accepts only the official v0.49.7 schema-v5 generation:
 SQLite `application_id=0x44554653`, `user_version=5`, no
