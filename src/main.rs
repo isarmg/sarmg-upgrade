@@ -3,10 +3,12 @@ use std::path::PathBuf;
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use isarmg_upgrade::{
-    BackupManifest, Product, RecoveryAction, RestoreExisting, SentinelRecoveryOptions,
-    SentinelUpgradeOptions, create_sqlite_backup, recover_sentinel_upgrade, recover_sqlite_restore,
-    restore_sqlite_backup, sentinel_credentials_key_from_file, upgrade_sentinel, upgrade_sqlite,
-    verify_sentinel_source_backup, verify_source_backup, verify_sqlite_backup,
+    BackupManifest, DufsRecoveryOptions, DufsTreeBudget, DufsUpgradeOptions, Product,
+    RecoveryAction, RestoreExisting, SentinelRecoveryOptions, SentinelUpgradeOptions,
+    create_sqlite_backup, recover_dufs_upgrade, recover_sentinel_upgrade, recover_sqlite_restore,
+    restore_sqlite_backup, sentinel_credentials_key_from_file, upgrade_dufs, upgrade_sentinel,
+    upgrade_sqlite, verify_dufs_source_backup, verify_sentinel_source_backup, verify_source_backup,
+    verify_sqlite_backup,
 };
 
 #[derive(Debug, Parser)]
@@ -141,6 +143,81 @@ enum Command {
         database: PathBuf,
         #[arg(long, value_name = "RUNTIME_DIRECTORY")]
         runtime_directory: PathBuf,
+        #[arg(long, value_name = "RECOVERY_DIRECTORY")]
+        recovery: PathBuf,
+        #[arg(long)]
+        action: RecoveryAction,
+    },
+    /// Upgrade the exact Dufs SQLite/config/shared-tree generation offline.
+    UpgradeDufs {
+        #[arg(long)]
+        product: Product,
+        #[arg(long)]
+        from_version: String,
+        #[arg(long)]
+        to_version: String,
+        #[arg(long, value_name = "STATE_SQLITE3")]
+        database: PathBuf,
+        #[arg(long, value_name = "NEW_COMPOSITE_BACKUP_DIRECTORY")]
+        backup_output: PathBuf,
+        #[arg(long, value_name = "PROTECTED_YAML")]
+        config: PathBuf,
+        #[arg(long, value_name = "SHARED_ROOT")]
+        shared_root: PathBuf,
+        #[arg(long, value_name = "STATE_DIRECTORY")]
+        state_dir: PathBuf,
+        #[arg(long)]
+        service_uid: u32,
+        #[arg(long)]
+        service_gid: u32,
+        #[arg(long)]
+        max_tree_entries: u64,
+        #[arg(long)]
+        max_tree_logical_bytes: u64,
+        #[arg(long)]
+        max_tree_backup_bytes: u64,
+        #[arg(long)]
+        max_entries_per_directory: u64,
+    },
+    /// Verify an immutable Dufs v0.49.7 composite source backup.
+    VerifyDufsSourceBackup {
+        #[arg(long)]
+        product: Product,
+        #[arg(long)]
+        from_version: String,
+        #[arg(long)]
+        to_version: String,
+        #[arg(long, value_name = "SOURCE_BACKUP_DIRECTORY")]
+        input: PathBuf,
+        #[arg(long, value_name = "PROTECTED_YAML")]
+        config: PathBuf,
+        #[arg(long, value_name = "SHARED_ROOT")]
+        shared_root: PathBuf,
+        #[arg(long)]
+        service_uid: u32,
+        #[arg(long)]
+        service_gid: u32,
+    },
+    /// Finish or roll back an interrupted exact Dufs composite upgrade.
+    RecoverDufsUpgrade {
+        #[arg(long)]
+        product: Product,
+        #[arg(long)]
+        from_version: String,
+        #[arg(long)]
+        to_version: String,
+        #[arg(long, value_name = "STATE_SQLITE3")]
+        database: PathBuf,
+        #[arg(long, value_name = "PROTECTED_YAML")]
+        config: PathBuf,
+        #[arg(long, value_name = "SHARED_ROOT")]
+        shared_root: PathBuf,
+        #[arg(long, value_name = "STATE_DIRECTORY")]
+        state_dir: PathBuf,
+        #[arg(long)]
+        service_uid: u32,
+        #[arg(long)]
+        service_gid: u32,
         #[arg(long, value_name = "RECOVERY_DIRECTORY")]
         recovery: PathBuf,
         #[arg(long)]
@@ -286,6 +363,95 @@ fn main() -> anyhow::Result<()> {
                 to_version,
                 database,
                 runtime_directory,
+                recovery_directory: recovery,
+                action,
+            })?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
+        Command::UpgradeDufs {
+            product,
+            from_version,
+            to_version,
+            database,
+            backup_output,
+            config,
+            shared_root,
+            state_dir,
+            service_uid,
+            service_gid,
+            max_tree_entries,
+            max_tree_logical_bytes,
+            max_tree_backup_bytes,
+            max_entries_per_directory,
+        } => {
+            let result = upgrade_dufs(&DufsUpgradeOptions {
+                product,
+                from_version,
+                to_version,
+                database,
+                backup_output,
+                config,
+                shared_root,
+                state_dir,
+                service_uid,
+                service_gid,
+                tree_budget: DufsTreeBudget {
+                    max_entries: max_tree_entries,
+                    max_logical_bytes: max_tree_logical_bytes,
+                    max_backup_bytes: max_tree_backup_bytes,
+                    max_entries_per_directory,
+                },
+            })?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
+        Command::VerifyDufsSourceBackup {
+            product,
+            from_version,
+            to_version,
+            input,
+            config,
+            shared_root,
+            service_uid,
+            service_gid,
+        } => {
+            let backup = verify_dufs_source_backup(
+                product,
+                &from_version,
+                &to_version,
+                &input,
+                &config,
+                &shared_root,
+                service_uid,
+                service_gid,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&backup.manifest)?);
+            Ok(())
+        }
+        Command::RecoverDufsUpgrade {
+            product,
+            from_version,
+            to_version,
+            database,
+            config,
+            shared_root,
+            state_dir,
+            service_uid,
+            service_gid,
+            recovery,
+            action,
+        } => {
+            let result = recover_dufs_upgrade(&DufsRecoveryOptions {
+                product,
+                from_version,
+                to_version,
+                database,
+                config,
+                shared_root,
+                state_dir,
+                service_uid,
+                service_gid,
                 recovery_directory: recovery,
                 action,
             })?;

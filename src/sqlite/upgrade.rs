@@ -29,10 +29,16 @@ use crate::{
     manifest::MANIFEST_VERSION,
 };
 
+mod dufs_0_49_7_to_0_50_0;
 mod host_0_6_to_0_7;
 mod sentinel_0_1_to_0_2;
 mod sunshine_0_6_to_0_7;
 
+pub use dufs_0_49_7_to_0_50_0::{
+    DufsCompositeBackupManifest, DufsRecoveryOptions, DufsStoredResource, DufsTreeBudget,
+    DufsUpgradeOptions, DufsUpgradeResult, VerifiedDufsSourceBackup, recover_dufs_upgrade,
+    upgrade_dufs, verify_dufs_source_backup,
+};
 pub use sentinel_0_1_to_0_2::{
     SentinelCompanionContract, SentinelRecordingArchive, SentinelRecoveryOptions,
     SentinelSourceBackupManifest, SentinelStoredFile, SentinelUpgradeOptions,

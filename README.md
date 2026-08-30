@@ -19,8 +19,9 @@ application version or schema identity without modifying it.
   failed install preserves the original generation and recovery evidence.
 - Services must be stopped, and the tool must obtain the same maintenance lock
   contract as the corresponding product before changing state.
-- Secrets are requirements in a manifest, not contents of a backup, unless a
-  future adapter explicitly defines a separately encrypted secret resource.
+- Raw external keys are requirements in a manifest, not contents of a backup.
+  An adapter may define a protected configuration as a sensitive backup
+  resource; its manifest still contains only hashes and aggregate metadata.
 
 The catalog includes all six repositories. `isarmg-foundation` is a library and
 therefore has source/API upgrade adapters but no runtime backup resources.
@@ -64,6 +65,19 @@ isarmg-upgrade verify-sentinel-source-backup --product sentinel-monitor \\
   --from-version 0.1.0 --to-version 0.2.0 \\
   --input /srv/backup/sentinel-monitor-0.1.0-before-upgrade \\
   --credentials-key-file /run/credentials/sentinel.key
+isarmg-upgrade upgrade-dufs --product dufs-ram \\
+  --from-version 0.49.7 --to-version 0.50.0 \\
+  --database /var/lib/dufs/state.sqlite3 --state-dir /var/lib/dufs \\
+  --shared-root /srv/dufs --config /etc/dufs/dufs.yml \\
+  --service-uid 991 --service-gid 991 \\
+  --backup-output /srv/backup/dufs-0.49.7-before-upgrade \\
+  --max-tree-entries 1000000 --max-tree-logical-bytes 1099511627776 \\
+  --max-tree-backup-bytes 1099511627776 --max-entries-per-directory 100000
+isarmg-upgrade verify-dufs-source-backup --product dufs-ram \\
+  --from-version 0.49.7 --to-version 0.50.0 \\
+  --input /srv/backup/dufs-0.49.7-before-upgrade \\
+  --config /etc/dufs/dufs.yml --shared-root /srv/dufs \\
+  --service-uid 991 --service-gid 991
 ```
 
 Replacing an existing database is never implicit. Restore stages and verifies
@@ -78,10 +92,11 @@ isarmg-upgrade recover-sqlite --product host-monitoring \\
   --expect-version 0.7.0 --recovery /path/from/error --action rollback
 ```
 
-The registered adapters support exactly Host Monitoring `0.6.0 -> 0.7.0` and
-Sunshine Manager `0.6.0 -> 0.7.0`, plus the composite Sentinel Monitor
-`0.1.0 -> 0.2.0` adapter. They validate their exact SQLx ledgers and SHA-384
-checksums, clone the source generation without opening it, publish a verified
+The registered adapters support exactly Host Monitoring `0.6.0 -> 0.7.0`,
+Sunshine Manager `0.6.0 -> 0.7.0`, composite Sentinel Monitor
+`0.1.0 -> 0.2.0`, and composite Dufs `0.49.7 -> 0.50.0`. The SQLx-based
+adapters validate their exact ledgers and SHA-384 checksums. All adapters clone
+the source generation without opening it, publish a verified
 old-generation backup, create the current schema in a same-filesystem staging
 directory, and copy every table through explicit column lists. They do not run
 `ALTER TABLE` against the source.
@@ -108,6 +123,50 @@ isarmg-upgrade recover-sentinel-upgrade --product sentinel-monitor \\
   --recovery /path/from/error --action commit
 ```
 
+The Dufs adapter accepts only the official v0.49.7 schema-v5 generation:
+SQLite `application_id=0x44554653`, `user_version=5`, no
+`product_metadata`, and schema SHA-256
+`3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423`.
+The source tag is pinned to commit
+`5b098e2a8f05557b72efdf7929f4ccef3a3af837`; the target contract is pinned to
+`2369bd990abf4c1492ca16178f2f66765104be25`. The target is a newly built
+v0.50.0 revision-1 database with the same data-schema fingerprint and exact
+`dufs-ram` metadata; the old database is never altered in place.
+
+The protected YAML config supplies the only owner-mapping authority. Every old
+`SHA256(username)` owner in operations, upload sessions, and purge jobs is
+rewritten to `SHA256("dufs-durable-owner-v1\0" || username)`. Unknown owners
+and old/new/target-key collisions are rejected before backup publication. The
+adapter validates the shared-root device/inode binding, active upload stage
+identity, purge resource identity, and reserved namespaces. It atomically
+renames each exact v0.49.7 private directory
+`.dufs-quarantine-00000000-0000-0000-0000-000000000000.hold` to
+`.dufs-upload-stages`; upload `target_revision` bytes are preserved.
+
+The immutable Dufs backup contains the byte-exact raw SQLite generation and
+sidecars, a recovered canonical source database, the protected config, and a
+metadata-, hard-link-, sparse-file-, symlink-, and xattr-aware shared-tree
+copy. Its manifest marks the protected config as sensitive without including
+usernames, password hashes, or owner digests. Required tree budgets are
+operator-selected and recorded. Lock order is config anchor, exclusive database
+maintenance lock, then nonblocking exclusive shared-root lock.
+
+Dufs does not honor the database maintenance lock at runtime. The durable
+journal therefore atomically exchanges a fixed non-SQLite blocker into
+`state.sqlite3` before any tree rename, and leaves it there until the target is
+fully verified. Resolve a crash explicitly; ambiguous generations remain
+blocked rather than letting either Dufs version initialize a new database:
+
+```console
+isarmg-upgrade recover-dufs-upgrade --product dufs-ram \\
+  --from-version 0.49.7 --to-version 0.50.0 \\
+  --database /var/lib/dufs/state.sqlite3 \\
+  --state-dir /var/lib/dufs --shared-root /srv/dufs \\
+  --config /etc/dufs/dufs.yml --service-uid 991 --service-gid 991 \\
+  --recovery /var/lib/dufs/.state.sqlite3.dufs-ram.upgrade-recovery \\
+  --action rollback
+```
+
 The generic SQLite-only commands have a code-owned allowlist containing only
 Host Monitoring `0.7.0`, revision `1`, schema SHA-256
 `2f63778e94b345d100c10f8b45b98f06e39590547f6b1d65f9b5b0e7f6989328`, and
@@ -115,9 +174,9 @@ Sunshine Manager `0.7.0`, revision `1`, schema SHA-256
 `1e55653f9b9b4805873164e52b79d399aec4fe327a8648218d4cbcb16b561b98`.
 Database metadata, the actual schema, backup manifest, explicit product, and
 restore/recovery journal must all agree with that allowlist. A different but
-self-consistent identity is rejected. Sentinel has only the exact composite
-command above; Photo and Dufs commands are added only together with tested
-product adapters.
+self-consistent identity is rejected. Sentinel and Dufs have only their exact
+composite commands above; Photo commands are added only together with a tested
+product adapter.
 
 ## Development
 

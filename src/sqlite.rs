@@ -32,11 +32,13 @@ pub use restore::{
     restore_sqlite_backup,
 };
 pub use upgrade::{
-    SentinelCompanionContract, SentinelRecordingArchive, SentinelRecoveryOptions,
-    SentinelSourceBackupManifest, SentinelStoredFile, SentinelUpgradeOptions,
-    SentinelUpgradeResult, SqliteUpgradeResult, VerifiedSentinelSourceBackup, VerifiedSourceBackup,
-    recover_sentinel_upgrade, sentinel_credentials_key_from_file, upgrade_sentinel, upgrade_sqlite,
-    verify_sentinel_source_backup, verify_source_backup,
+    DufsCompositeBackupManifest, DufsRecoveryOptions, DufsStoredResource, DufsTreeBudget,
+    DufsUpgradeOptions, DufsUpgradeResult, SentinelCompanionContract, SentinelRecordingArchive,
+    SentinelRecoveryOptions, SentinelSourceBackupManifest, SentinelStoredFile,
+    SentinelUpgradeOptions, SentinelUpgradeResult, SqliteUpgradeResult, VerifiedDufsSourceBackup,
+    VerifiedSentinelSourceBackup, VerifiedSourceBackup, recover_dufs_upgrade,
+    recover_sentinel_upgrade, sentinel_credentials_key_from_file, upgrade_dufs, upgrade_sentinel,
+    upgrade_sqlite, verify_dufs_source_backup, verify_sentinel_source_backup, verify_source_backup,
 };
 
 const DATABASE_FILE: &str = "database.sqlite3";
