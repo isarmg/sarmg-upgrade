@@ -18,8 +18,8 @@ use serde::Serialize;
 use sha2::{Digest, Sha384};
 
 use super::{
-    DATABASE_FILE, MANIFEST_FILE, MAX_MANIFEST_BYTES, MaintenanceLock, PendingDirectory,
-    SecureDirectory, copy_database_online, hash_regular_file, open_read_only,
+    DATABASE_FILE, MANIFEST_FILE, MAX_MANIFEST_BYTES, MaintenanceLock, PRODUCT_METADATA_DDL,
+    PendingDirectory, SecureDirectory, copy_database_online, hash_regular_file, open_read_only,
     restore::{RestorePoint, recover_sqlite_restore_under_lock, replace_with_staged_database},
     schema_fingerprint_connection, secure_resolve_flags, sync_directory, verify_current_database,
     write_manifest,
@@ -40,13 +40,6 @@ pub use sentinel_0_1_to_0_2::{
     sentinel_credentials_key_from_file, upgrade_sentinel, verify_sentinel_source_backup,
 };
 
-const PRODUCT_METADATA_DDL: &str = "CREATE TABLE product_metadata (\n\
-    singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton=1),\n\
-    application TEXT NOT NULL,\n\
-    application_version TEXT NOT NULL,\n\
-    schema_revision INTEGER NOT NULL,\n\
-    schema_sha256 TEXT NOT NULL\n\
-)";
 const SQLITE_SIDECARS: [&str; 3] = ["-wal", "-shm", "-journal"];
 
 #[derive(Clone, Debug)]
@@ -660,6 +653,16 @@ mod tests {
     }
 
     #[test]
+    fn generic_current_allowlist_matches_registered_adapter_targets() {
+        for adapter in [host_0_6_to_0_7::ADAPTER, sunshine_0_6_to_0_7::ADAPTER] {
+            let official = super::super::official_sqlite_identity(adapter.product).unwrap();
+            assert_eq!(adapter.to_version, official.application_version);
+            assert_eq!(adapter.target_revision, official.schema_revision);
+            assert_eq!(adapter.target_schema_sha256, official.schema_sha256);
+        }
+    }
+
+    #[test]
     fn upgrades_real_host_fixture_and_preserves_every_table() {
         let root = tempfile::tempdir().unwrap();
         let database = root.path().join("host.sqlite3");
@@ -885,7 +888,7 @@ mod tests {
                         .contains(".restore-")
                 })
                 .unwrap();
-            recover_sqlite_restore(&recovery, action).unwrap();
+            recover_sqlite_restore(Product::HostMonitoring, "0.7.0", &recovery, action).unwrap();
             if action == RecoveryAction::Rollback {
                 assert_eq!(generation_bytes(&database), before);
                 verify_source_database(&database, host_0_6_to_0_7::ADAPTER).unwrap();
@@ -1006,7 +1009,7 @@ mod tests {
                         .contains(".restore-")
                 })
                 .unwrap();
-            recover_sqlite_restore(&recovery, action).unwrap();
+            recover_sqlite_restore(Product::SunshineManager, "0.7.0", &recovery, action).unwrap();
             if action == RecoveryAction::Rollback {
                 assert_eq!(generation_bytes(&database), before);
                 verify_source_database(&database, sunshine_0_6_to_0_7::ADAPTER).unwrap();

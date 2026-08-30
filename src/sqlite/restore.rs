@@ -23,7 +23,8 @@ use uuid::Uuid;
 
 use super::{
     DATABASE_FILE, DatabaseLocation, MaintenanceLock, SecureDirectory, absolute_path,
-    hash_regular_file, secure_resolve_flags, verify_current_database, verify_sqlite_backup,
+    hash_regular_file, official_sqlite_identity, secure_resolve_flags, verify_current_database,
+    verify_official_sqlite_database, verify_official_sqlite_identity, verify_sqlite_backup,
 };
 use crate::{Product, SchemaIdentity};
 
@@ -102,15 +103,12 @@ pub fn restore_sqlite_backup(
     database: &Path,
     existing: RestoreExisting,
 ) -> anyhow::Result<RestoreResult> {
-    let backup = verify_sqlite_backup(input)?;
+    let official = official_sqlite_identity(product)?;
     ensure!(
-        backup.manifest.product == product,
-        "backup product does not match --product"
+        expected_application_version == official.application_version,
+        "--expect-version is not the official current version for {product}"
     );
-    ensure!(
-        backup.manifest.application_version == expected_application_version,
-        "backup application version does not match --expect-version"
-    );
+    let backup = verify_sqlite_backup(product, input)?;
     let expected_identity = backup
         .manifest
         .schema_identity
@@ -120,6 +118,18 @@ pub fn restore_sqlite_backup(
     let maintenance = MaintenanceLock::exclusive(product, database)?;
     let location = &maintenance.location;
     let originals = inspect_original_generation(location)?;
+    let has_database = originals
+        .iter()
+        .any(|entry| OsStr::new(&entry.destination_name) == location.database_name);
+    if has_database {
+        verify_official_sqlite_database(&location.database_path(), product)
+            .context("verify existing restore destination identity")?;
+    } else {
+        ensure!(
+            originals.is_empty(),
+            "restore destination has SQLite sidecars without a main database"
+        );
+    }
     if !originals.is_empty() && existing == RestoreExisting::Refuse {
         anyhow::bail!(
             "restore destination already has a SQLite generation; pass --replace-existing"
@@ -165,23 +175,118 @@ pub fn restore_sqlite_backup(
     }
 }
 
-/// Resolve an interrupted restore journal in the direction chosen by an
-/// operator. No automatic direction is inferred from an old version.
+/// Resolve an interrupted generic restore journal for one explicit official
+/// product identity in the direction chosen by an operator. Product, version,
+/// and direction are never inferred from journal contents.
 pub fn recover_sqlite_restore(
+    product: Product,
+    expected_application_version: &str,
     recovery_path: &Path,
     action: RecoveryAction,
 ) -> anyhow::Result<RecoveryResult> {
+    let official = official_sqlite_identity(product)?;
+    ensure!(
+        expected_application_version == official.application_version,
+        "--expect-version is not the official current version for {product}"
+    );
     let recovery = RecoveryDirectory::open(recovery_path)?;
     let journal = recovery.read_journal()?;
     journal.validate()?;
+    ensure!(
+        journal.product == product,
+        "recovery journal does not match the explicit product"
+    );
+    ensure!(
+        journal.application_version == expected_application_version,
+        "recovery journal does not match --expect-version"
+    );
+    verify_official_sqlite_identity(product, &journal.schema_identity)?;
     recovery.validate_name(&journal)?;
     let destination = recovery
         .configured_path
         .parent()
         .context("recovery directory must have a parent")?
         .join(&journal.destination_name);
-    let maintenance = MaintenanceLock::exclusive(journal.product, &destination)?;
+    let maintenance = MaintenanceLock::exclusive(product, &destination)?;
+    verify_official_recovery_generation(&recovery, &journal, product, action)?;
     recover_sqlite_restore_locked(recovery, journal, destination, &maintenance, action)
+}
+
+fn verify_official_recovery_generation(
+    recovery: &RecoveryDirectory,
+    journal: &RestoreJournal,
+    product: Product,
+    action: RecoveryAction,
+) -> anyhow::Result<()> {
+    let incoming = regular_file_hash_if_present(&recovery.directory.file, INCOMING_FILE)?;
+    if let Some((bytes, sha256)) = &incoming {
+        ensure!(
+            *bytes == journal.incoming_bytes && *sha256 == journal.incoming_sha256,
+            "staged recovery database does not match its journal"
+        );
+        let identity =
+            verify_official_sqlite_database(&recovery.child_path(INCOMING_FILE), product)?;
+        ensure!(
+            identity == journal.schema_identity,
+            "staged recovery database identity does not match its journal"
+        );
+    }
+
+    let abandoned =
+        regular_file_hash_if_present(&recovery.directory.file, "abandoned-new.sqlite3")?;
+    if let Some((bytes, sha256)) = &abandoned {
+        ensure!(
+            *bytes == journal.incoming_bytes && *sha256 == journal.incoming_sha256,
+            "abandoned recovery database does not match its journal"
+        );
+        let identity = verify_official_sqlite_database(
+            &recovery.child_path("abandoned-new.sqlite3"),
+            product,
+        )?;
+        ensure!(
+            identity == journal.schema_identity,
+            "abandoned recovery database identity does not match its journal"
+        );
+    }
+
+    let destination =
+        regular_file_hash_if_present(&recovery.parent.file, &journal.destination_name)?;
+    let destination_is_incoming = destination.as_ref().is_some_and(|(bytes, sha256)| {
+        *bytes == journal.incoming_bytes && *sha256 == journal.incoming_sha256
+    });
+    if destination_is_incoming {
+        let identity = verify_official_sqlite_database(
+            &recovery.parent.child_path(&journal.destination_name),
+            product,
+        )?;
+        ensure!(
+            identity == journal.schema_identity,
+            "installed recovery database identity does not match its journal"
+        );
+    }
+    let has_incoming_evidence =
+        incoming.is_some() || abandoned.is_some() || destination_is_incoming;
+    if !has_incoming_evidence {
+        ensure!(
+            action == RecoveryAction::Rollback,
+            "recovery journal has no verifiable official incoming generation"
+        );
+        let original = journal
+            .originals
+            .iter()
+            .find(|entry| entry.destination_name == journal.destination_name);
+        ensure!(
+            match (original, destination) {
+                (Some(original), Some((bytes, sha256))) => {
+                    bytes == original.bytes && sha256 == original.sha256
+                }
+                (None, None) => true,
+                _ => false,
+            },
+            "rollback recovery has neither official incoming evidence nor the exact original destination"
+        );
+    }
+    Ok(())
 }
 
 pub(super) fn recover_sqlite_restore_under_lock(
@@ -1078,53 +1183,59 @@ fn read_bounded_at(parent: &File, name: &str, limit: u64) -> anyhow::Result<Vec<
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{collections::BTreeMap, fs};
 
     use rusqlite::Connection;
 
     use super::*;
-    use crate::sqlite::{create_sqlite_backup, tests::create_current_database};
+    use crate::BackupManifest;
+    use crate::sqlite::{
+        create_sqlite_backup,
+        tests::{create_current_database, insert_test_record, test_record_count},
+    };
 
-    fn widget_count(path: &Path) -> i64 {
-        Connection::open(path)
+    fn directory_bytes(path: &Path) -> BTreeMap<String, Vec<u8>> {
+        fs::read_dir(path)
             .unwrap()
-            .query_row("SELECT COUNT(*) FROM widgets", [], |row| row.get(0))
-            .unwrap()
-    }
-
-    fn insert_widget(path: &Path, name: &str) {
-        Connection::open(path)
-            .unwrap()
-            .execute("INSERT INTO widgets (name) VALUES (?1)", [name])
-            .unwrap();
+            .map(|entry| {
+                let entry = entry.unwrap();
+                (
+                    entry.file_name().into_string().unwrap(),
+                    fs::read(entry.path()).unwrap(),
+                )
+            })
+            .collect()
     }
 
     #[test]
-    fn restores_missing_database_without_replace_flag() {
-        let root = tempfile::tempdir().unwrap();
-        let source = root.path().join("source.sqlite3");
-        let backup = root.path().join("backup");
-        let destination = root.path().join("restored.sqlite3");
-        create_current_database(&source, Product::HostMonitoring, "0.7.0");
-        insert_widget(&source, "saved");
-        create_sqlite_backup(Product::HostMonitoring, &source, &backup).unwrap();
+    fn restores_exact_official_host_and_sunshine_without_replace_flag() {
+        for product in [Product::HostMonitoring, Product::SunshineManager] {
+            let root = tempfile::tempdir().unwrap();
+            let source = root.path().join("source.sqlite3");
+            let backup = root.path().join("backup");
+            let destination = root.path().join("restored.sqlite3");
+            let official = official_sqlite_identity(product).unwrap();
+            create_current_database(&source, product, official.application_version);
+            insert_test_record(&source, product, "saved");
+            create_sqlite_backup(product, &source, &backup).unwrap();
 
-        restore_sqlite_backup(
-            Product::HostMonitoring,
-            "0.7.0",
-            &backup,
-            &destination,
-            RestoreExisting::Refuse,
-        )
-        .unwrap();
-        assert_eq!(widget_count(&destination), 1);
-        assert!(fs::read_dir(root.path()).unwrap().all(|entry| {
-            !entry
-                .unwrap()
-                .file_name()
-                .to_string_lossy()
-                .contains(".restore-")
-        }));
+            restore_sqlite_backup(
+                product,
+                official.application_version,
+                &backup,
+                &destination,
+                RestoreExisting::Refuse,
+            )
+            .unwrap();
+            assert_eq!(test_record_count(&destination, product), 1);
+            assert!(fs::read_dir(root.path()).unwrap().all(|entry| {
+                !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".restore-")
+            }));
+        }
     }
 
     #[test]
@@ -1159,9 +1270,9 @@ mod tests {
         let backup = root.path().join("backup");
         create_current_database(&source, Product::HostMonitoring, "0.7.0");
         create_current_database(&destination, Product::HostMonitoring, "0.7.0");
-        insert_widget(&source, "new");
-        insert_widget(&destination, "old-one");
-        insert_widget(&destination, "old-two");
+        insert_test_record(&source, Product::HostMonitoring, "new");
+        insert_test_record(&destination, Product::HostMonitoring, "old-one");
+        insert_test_record(&destination, Product::HostMonitoring, "old-two");
         create_sqlite_backup(Product::HostMonitoring, &source, &backup).unwrap();
 
         restore_sqlite_backup(
@@ -1172,7 +1283,7 @@ mod tests {
             RestoreExisting::Replace,
         )
         .unwrap();
-        assert_eq!(widget_count(&destination), 1);
+        assert_eq!(test_record_count(&destination, Product::HostMonitoring), 1);
     }
 
     #[test]
@@ -1184,11 +1295,11 @@ mod tests {
             let backup = root.path().join("backup");
             create_current_database(&source, Product::HostMonitoring, "0.7.0");
             create_current_database(&destination, Product::HostMonitoring, "0.7.0");
-            insert_widget(&source, "new");
-            insert_widget(&destination, "old-one");
-            insert_widget(&destination, "old-two");
+            insert_test_record(&source, Product::HostMonitoring, "new");
+            insert_test_record(&destination, Product::HostMonitoring, "old-one");
+            insert_test_record(&destination, Product::HostMonitoring, "old-two");
             create_sqlite_backup(Product::HostMonitoring, &source, &backup).unwrap();
-            let verified = verify_sqlite_backup(&backup).unwrap();
+            let verified = verify_sqlite_backup(Product::HostMonitoring, &backup).unwrap();
             let identity = verified.manifest.schema_identity.unwrap();
             let maintenance =
                 MaintenanceLock::exclusive(Product::HostMonitoring, &destination).unwrap();
@@ -1217,9 +1328,10 @@ mod tests {
             drop(recovery);
             drop(maintenance);
 
-            recover_sqlite_restore(&recovery_path, action).unwrap();
+            recover_sqlite_restore(Product::HostMonitoring, "0.7.0", &recovery_path, action)
+                .unwrap();
             assert_eq!(
-                widget_count(&destination),
+                test_record_count(&destination, Product::HostMonitoring),
                 if action == RecoveryAction::Commit {
                     1
                 } else {
@@ -1269,5 +1381,215 @@ mod tests {
             .is_err()
         );
         assert_eq!(fs::read(&destination).unwrap(), before);
+    }
+
+    #[test]
+    fn restore_rejects_cross_product_tampered_manifest_and_unknown_schema_before_write() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source.sqlite3");
+        let host_destination = root.path().join("host-destination.sqlite3");
+        let sunshine_destination = root.path().join("sunshine-destination.sqlite3");
+        let backup = root.path().join("backup");
+        create_current_database(&source, Product::HostMonitoring, "0.7.0");
+        create_current_database(&host_destination, Product::HostMonitoring, "0.7.0");
+        create_current_database(&sunshine_destination, Product::SunshineManager, "0.7.0");
+        insert_test_record(&host_destination, Product::HostMonitoring, "keep-host");
+        insert_test_record(
+            &sunshine_destination,
+            Product::SunshineManager,
+            "keep-sunshine",
+        );
+        create_sqlite_backup(Product::HostMonitoring, &source, &backup).unwrap();
+        let host_before = fs::read(&host_destination).unwrap();
+        let sunshine_before = fs::read(&sunshine_destination).unwrap();
+
+        assert!(
+            restore_sqlite_backup(
+                Product::SunshineManager,
+                "0.7.0",
+                &backup,
+                &sunshine_destination,
+                RestoreExisting::Replace,
+            )
+            .is_err()
+        );
+        assert_eq!(fs::read(&sunshine_destination).unwrap(), sunshine_before);
+        assert!(
+            restore_sqlite_backup(
+                Product::HostMonitoring,
+                "0.7.0",
+                &backup,
+                &sunshine_destination,
+                RestoreExisting::Replace,
+            )
+            .is_err()
+        );
+        assert_eq!(fs::read(&sunshine_destination).unwrap(), sunshine_before);
+
+        let manifest_path = backup.join(super::super::MANIFEST_FILE);
+        let original_manifest = fs::read(&manifest_path).unwrap();
+        let mut tampered: serde_json::Value = serde_json::from_slice(&original_manifest).unwrap();
+        tampered["schema_identity"]["schema_revision"] = serde_json::json!(2);
+        fs::write(
+            &manifest_path,
+            serde_json::to_vec_pretty(&tampered).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            restore_sqlite_backup(
+                Product::HostMonitoring,
+                "0.7.0",
+                &backup,
+                &host_destination,
+                RestoreExisting::Replace,
+            )
+            .is_err()
+        );
+        assert_eq!(fs::read(&host_destination).unwrap(), host_before);
+
+        fs::write(&manifest_path, &original_manifest).unwrap();
+        let backup_database = backup.join(DATABASE_FILE);
+        let connection = Connection::open(&backup_database).unwrap();
+        connection
+            .execute_batch("CREATE TABLE self_consistent_unknown (id INTEGER PRIMARY KEY);")
+            .unwrap();
+        let unknown_sha = super::super::schema_fingerprint_connection(&connection).unwrap();
+        connection
+            .execute(
+                "UPDATE product_metadata SET schema_sha256=?1",
+                [&unknown_sha],
+            )
+            .unwrap();
+        drop(connection);
+        let (bytes, sha256) = hash_regular_file(&backup_database).unwrap();
+        let mut unknown: BackupManifest = BackupManifest::from_slice(&original_manifest).unwrap();
+        unknown.schema_identity.as_mut().unwrap().schema_sha256 = unknown_sha;
+        unknown.resources[0].bytes = bytes;
+        unknown.resources[0].sha256 = sha256;
+        fs::write(&manifest_path, serde_json::to_vec_pretty(&unknown).unwrap()).unwrap();
+        assert!(
+            restore_sqlite_backup(
+                Product::HostMonitoring,
+                "0.7.0",
+                &backup,
+                &host_destination,
+                RestoreExisting::Replace,
+            )
+            .is_err()
+        );
+        assert_eq!(fs::read(&host_destination).unwrap(), host_before);
+    }
+
+    #[test]
+    fn generic_recovery_requires_explicit_official_product_version_and_journal_identity() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source.sqlite3");
+        let destination = root.path().join("destination.sqlite3");
+        let backup = root.path().join("backup");
+        create_current_database(&source, Product::HostMonitoring, "0.7.0");
+        create_current_database(&destination, Product::HostMonitoring, "0.7.0");
+        insert_test_record(&source, Product::HostMonitoring, "new");
+        insert_test_record(&destination, Product::HostMonitoring, "old");
+        create_sqlite_backup(Product::HostMonitoring, &source, &backup).unwrap();
+        let verified = verify_sqlite_backup(Product::HostMonitoring, &backup).unwrap();
+        let identity = verified.manifest.schema_identity.unwrap();
+        let maintenance =
+            MaintenanceLock::exclusive(Product::HostMonitoring, &destination).unwrap();
+        let originals = inspect_original_generation(&maintenance.location).unwrap();
+        let recovery =
+            RecoveryDirectory::create(&maintenance.location, Product::HostMonitoring).unwrap();
+        let mut mutation_started = false;
+        let result = restore_prepared(
+            &verified.directory,
+            &maintenance.location,
+            &recovery,
+            originals,
+            Product::HostMonitoring,
+            &identity,
+            &mut mutation_started,
+            |point| {
+                if matches!(point, RestorePoint::Installed) {
+                    anyhow::bail!("injected recovery identity test interruption")
+                }
+                Ok(())
+            },
+        );
+        assert!(result.is_err());
+        assert!(mutation_started);
+        let recovery_path = recovery.configured_path.clone();
+        drop(recovery);
+        drop(maintenance);
+
+        let destination_before = fs::read(&destination).unwrap();
+        let recovery_before = directory_bytes(&recovery_path);
+        assert!(
+            recover_sqlite_restore(
+                Product::SunshineManager,
+                "0.7.0",
+                &recovery_path,
+                RecoveryAction::Rollback,
+            )
+            .is_err()
+        );
+        assert!(
+            recover_sqlite_restore(
+                Product::HostMonitoring,
+                "0.8.0",
+                &recovery_path,
+                RecoveryAction::Rollback,
+            )
+            .is_err()
+        );
+        assert_eq!(fs::read(&destination).unwrap(), destination_before);
+        assert_eq!(directory_bytes(&recovery_path), recovery_before);
+
+        let journal_path = recovery_path.join(JOURNAL_FILE);
+        let original_journal = fs::read(&journal_path).unwrap();
+        let mut journal: RestoreJournal = serde_json::from_slice(&original_journal).unwrap();
+        journal.schema_identity.schema_revision = 2;
+        fs::write(&journal_path, serde_json::to_vec_pretty(&journal).unwrap()).unwrap();
+        let tampered_recovery = directory_bytes(&recovery_path);
+        assert!(
+            recover_sqlite_restore(
+                Product::HostMonitoring,
+                "0.7.0",
+                &recovery_path,
+                RecoveryAction::Rollback,
+            )
+            .is_err()
+        );
+        assert_eq!(fs::read(&destination).unwrap(), destination_before);
+        assert_eq!(directory_bytes(&recovery_path), tampered_recovery);
+
+        let connection = Connection::open(&destination).unwrap();
+        connection
+            .execute_batch("CREATE TABLE recovery_unknown_schema (id INTEGER PRIMARY KEY);")
+            .unwrap();
+        let unknown_sha = super::super::schema_fingerprint_connection(&connection).unwrap();
+        connection
+            .execute(
+                "UPDATE product_metadata SET schema_sha256=?1",
+                [&unknown_sha],
+            )
+            .unwrap();
+        drop(connection);
+        let (incoming_bytes, incoming_sha256) = hash_regular_file(&destination).unwrap();
+        let mut journal: RestoreJournal = serde_json::from_slice(&original_journal).unwrap();
+        journal.incoming_bytes = incoming_bytes;
+        journal.incoming_sha256 = incoming_sha256;
+        fs::write(&journal_path, serde_json::to_vec_pretty(&journal).unwrap()).unwrap();
+        let unknown_destination = fs::read(&destination).unwrap();
+        let unknown_recovery = directory_bytes(&recovery_path);
+        assert!(
+            recover_sqlite_restore(
+                Product::HostMonitoring,
+                "0.7.0",
+                &recovery_path,
+                RecoveryAction::Rollback,
+            )
+            .is_err()
+        );
+        assert_eq!(fs::read(&destination).unwrap(), unknown_destination);
+        assert_eq!(directory_bytes(&recovery_path), unknown_recovery);
     }
 }

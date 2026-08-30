@@ -33,7 +33,8 @@ isarmg-upgrade inspect-manifest /path/to/backup/manifest.json
 isarmg-upgrade backup-sqlite --product host-monitoring \\
   --database /var/lib/isarmg/host-monitoring/app.sqlite3 \\
   --output /srv/backup/host-monitoring-0.7.0
-isarmg-upgrade verify-sqlite /srv/backup/host-monitoring-0.7.0
+isarmg-upgrade verify-sqlite --product host-monitoring \\
+  --input /srv/backup/host-monitoring-0.7.0
 isarmg-upgrade restore-sqlite --product host-monitoring \\
   --expect-version 0.7.0 \\
   --input /srv/backup/host-monitoring-0.7.0 \\
@@ -71,8 +72,10 @@ durable adjacent journal, and only then installs it. If a process is interrupted
 after mutation, the error prints the recovery directory; resolve it explicitly:
 
 ```console
-isarmg-upgrade recover-sqlite --recovery /path/from/error --action commit
-isarmg-upgrade recover-sqlite --recovery /path/from/error --action rollback
+isarmg-upgrade recover-sqlite --product host-monitoring \\
+  --expect-version 0.7.0 --recovery /path/from/error --action commit
+isarmg-upgrade recover-sqlite --product host-monitoring \\
+  --expect-version 0.7.0 --recovery /path/from/error --action rollback
 ```
 
 The registered adapters support exactly Host Monitoring `0.6.0 -> 0.7.0` and
@@ -105,10 +108,16 @@ isarmg-upgrade recover-sentinel-upgrade --product sentinel-monitor \\
   --recovery /path/from/error --action commit
 ```
 
-The generic SQLite-only backup command supports Host Monitoring and Sunshine
-Manager current databases. Sentinel has only the exact composite command above;
-Photo and Dufs commands are added only together with tested product adapters.
-This avoids advertising an unsafe generic migration.
+The generic SQLite-only commands have a code-owned allowlist containing only
+Host Monitoring `0.7.0`, revision `1`, schema SHA-256
+`2f63778e94b345d100c10f8b45b98f06e39590547f6b1d65f9b5b0e7f6989328`, and
+Sunshine Manager `0.7.0`, revision `1`, schema SHA-256
+`1e55653f9b9b4805873164e52b79d399aec4fe327a8648218d4cbcb16b561b98`.
+Database metadata, the actual schema, backup manifest, explicit product, and
+restore/recovery journal must all agree with that allowlist. A different but
+self-consistent identity is rejected. Sentinel has only the exact composite
+command above; Photo and Dufs commands are added only together with tested
+product adapters.
 
 ## Development
 

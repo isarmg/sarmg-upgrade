@@ -4,6 +4,7 @@ use anyhow::ensure;
 use rusqlite::{Connection, OptionalExtension};
 
 use super::{Adapter, Product, expected_migration_checksum};
+use crate::sqlite::HOST_CURRENT_SCHEMA_SHA256;
 
 const MIGRATION_0001: &str =
     include_str!("../../upgrades/host_0_6_to_0_7/0001_host_monitoring.sql");
@@ -38,8 +39,7 @@ const MIGRATIONS: [(i64, &str, &str); 5] = [
 
 pub(super) const SOURCE_SCHEMA_SHA256: &str =
     "bcd52ab6e338c3e9cbe5aeba3da07e25ba12eb76d0998d648b231ee6604b3be8";
-pub(super) const TARGET_SCHEMA_SHA256: &str =
-    "2f63778e94b345d100c10f8b45b98f06e39590547f6b1d65f9b5b0e7f6989328";
+pub(super) const TARGET_SCHEMA_SHA256: &str = HOST_CURRENT_SCHEMA_SHA256;
 
 pub(super) const ADAPTER: Adapter = Adapter {
     product: Product::HostMonitoring,

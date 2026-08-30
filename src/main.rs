@@ -40,7 +40,9 @@ enum Command {
     },
     /// Verify an immutable SQLite-only backup set.
     VerifySqlite {
-        #[arg(value_name = "BACKUP_DIRECTORY")]
+        #[arg(long)]
+        product: Product,
+        #[arg(long, value_name = "BACKUP_DIRECTORY")]
         input: PathBuf,
     },
     /// Restore one SQLite-only backup under an exclusive maintenance lock.
@@ -58,6 +60,10 @@ enum Command {
     },
     /// Finish or roll back an interrupted SQLite restore journal.
     RecoverSqlite {
+        #[arg(long)]
+        product: Product,
+        #[arg(long)]
+        expect_version: String,
         #[arg(long, value_name = "RECOVERY_DIRECTORY")]
         recovery: PathBuf,
         #[arg(long)]
@@ -160,8 +166,8 @@ fn main() -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(&backup.manifest)?);
             Ok(())
         }
-        Command::VerifySqlite { input } => {
-            let backup = verify_sqlite_backup(&input)?;
+        Command::VerifySqlite { product, input } => {
+            let backup = verify_sqlite_backup(product, &input)?;
             println!("{}", serde_json::to_string_pretty(&backup.manifest)?);
             Ok(())
         }
@@ -182,8 +188,13 @@ fn main() -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(&result)?);
             Ok(())
         }
-        Command::RecoverSqlite { recovery, action } => {
-            let result = recover_sqlite_restore(&recovery, action)?;
+        Command::RecoverSqlite {
+            product,
+            expect_version,
+            recovery,
+            action,
+        } => {
+            let result = recover_sqlite_restore(product, &expect_version, &recovery, action)?;
             println!("{}", serde_json::to_string_pretty(&result)?);
             Ok(())
         }

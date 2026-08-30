@@ -4,6 +4,7 @@ use anyhow::ensure;
 use rusqlite::{Connection, OptionalExtension};
 
 use super::{Adapter, Product, expected_migration_checksum};
+use crate::sqlite::SUNSHINE_CURRENT_SCHEMA_SHA256;
 
 const MIGRATION_0001: &str =
     include_str!("../../upgrades/sunshine_0_6_to_0_7/202608270001_initial.sql");
@@ -36,8 +37,7 @@ const MIGRATIONS: [(i64, &str, &str); 4] = [
 
 pub(super) const SOURCE_SCHEMA_SHA256: &str =
     "bcbde7b2f8589c19ec3b8ba92b1e73a6d8ce91cfc708769dc1b48b38b6df4e09";
-pub(super) const TARGET_SCHEMA_SHA256: &str =
-    "1e55653f9b9b4805873164e52b79d399aec4fe327a8648218d4cbcb16b561b98";
+pub(super) const TARGET_SCHEMA_SHA256: &str = SUNSHINE_CURRENT_SCHEMA_SHA256;
 
 pub(super) const ADAPTER: Adapter = Adapter {
     product: Product::SunshineManager,

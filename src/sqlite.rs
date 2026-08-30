@@ -42,6 +42,64 @@ pub use upgrade::{
 const DATABASE_FILE: &str = "database.sqlite3";
 const MANIFEST_FILE: &str = "manifest.json";
 const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
+pub(super) const PRODUCT_METADATA_DDL: &str = "CREATE TABLE product_metadata (\n\
+    singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton=1),\n\
+    application TEXT NOT NULL,\n\
+    application_version TEXT NOT NULL,\n\
+    schema_revision INTEGER NOT NULL,\n\
+    schema_sha256 TEXT NOT NULL\n\
+)";
+pub(super) const HOST_CURRENT_APPLICATION_VERSION: &str = "0.7.0";
+pub(super) const HOST_CURRENT_SCHEMA_REVISION: u64 = 1;
+pub(super) const HOST_CURRENT_SCHEMA_SHA256: &str =
+    "2f63778e94b345d100c10f8b45b98f06e39590547f6b1d65f9b5b0e7f6989328";
+pub(super) const SUNSHINE_CURRENT_APPLICATION_VERSION: &str = "0.7.0";
+pub(super) const SUNSHINE_CURRENT_SCHEMA_REVISION: u64 = 1;
+pub(super) const SUNSHINE_CURRENT_SCHEMA_SHA256: &str =
+    "1e55653f9b9b4805873164e52b79d399aec4fe327a8648218d4cbcb16b561b98";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct OfficialSqliteIdentity {
+    pub product: Product,
+    pub application_version: &'static str,
+    pub schema_revision: u64,
+    pub schema_sha256: &'static str,
+}
+
+pub(super) fn official_sqlite_identity(product: Product) -> anyhow::Result<OfficialSqliteIdentity> {
+    require_sqlite_only_product(product)?;
+    let identity = match product {
+        Product::HostMonitoring => OfficialSqliteIdentity {
+            product,
+            application_version: HOST_CURRENT_APPLICATION_VERSION,
+            schema_revision: HOST_CURRENT_SCHEMA_REVISION,
+            schema_sha256: HOST_CURRENT_SCHEMA_SHA256,
+        },
+        Product::SunshineManager => OfficialSqliteIdentity {
+            product,
+            application_version: SUNSHINE_CURRENT_APPLICATION_VERSION,
+            schema_revision: SUNSHINE_CURRENT_SCHEMA_REVISION,
+            schema_sha256: SUNSHINE_CURRENT_SCHEMA_SHA256,
+        },
+        _ => anyhow::bail!("no official generic current SQLite identity for {product}"),
+    };
+    Ok(identity)
+}
+
+pub(super) fn verify_official_sqlite_identity(
+    product: Product,
+    identity: &SchemaIdentity,
+) -> anyhow::Result<()> {
+    let official = official_sqlite_identity(product)?;
+    ensure!(
+        identity.application == official.product.slug()
+            && identity.application_version == official.application_version
+            && identity.schema_revision == official.schema_revision
+            && identity.schema_sha256 == official.schema_sha256,
+        "SQLite identity is not the exact official current contract for {product}"
+    );
+    Ok(())
+}
 
 #[derive(Clone, Debug)]
 pub struct VerifiedSqliteBackup {
@@ -61,15 +119,15 @@ pub fn create_sqlite_backup(
     require_sqlite_only_product(product)?;
     let maintenance = MaintenanceLock::shared(product, database)?;
     let source_path = maintenance.database_path();
-    let source_identity = verify_current_database(&source_path, product)
+    let source_identity = verify_official_sqlite_database(&source_path, product)
         .context("verify current source database before backup")?;
 
     let mut pending = PendingDirectory::create(output)?;
     let pending_path = pending.path();
     let database_output = pending_path.join(DATABASE_FILE);
     copy_database_online(&source_path, &database_output)?;
-    let snapshot_identity =
-        verify_current_database(&database_output, product).context("verify the SQLite snapshot")?;
+    let snapshot_identity = verify_official_sqlite_database(&database_output, product)
+        .context("verify the SQLite snapshot")?;
     ensure!(
         snapshot_identity == source_identity,
         "database identity changed while the backup was created"
@@ -101,11 +159,16 @@ pub fn create_sqlite_backup(
     pending.commit()?;
     drop(maintenance);
 
-    verify_sqlite_backup(output)
+    verify_sqlite_backup(product, output)
 }
 
-/// Verify the full backup set without changing either it or a product database.
-pub fn verify_sqlite_backup(input: &Path) -> anyhow::Result<VerifiedSqliteBackup> {
+/// Verify the full backup set against the explicitly selected official product
+/// identity without changing either it or a product database.
+pub fn verify_sqlite_backup(
+    product: Product,
+    input: &Path,
+) -> anyhow::Result<VerifiedSqliteBackup> {
+    let official = official_sqlite_identity(product)?;
     let directory = SecureDirectory::open(input, "backup directory")?;
     let entries = directory.entry_names()?;
     ensure!(
@@ -115,7 +178,14 @@ pub fn verify_sqlite_backup(input: &Path) -> anyhow::Result<VerifiedSqliteBackup
 
     let manifest_bytes = directory.read_bounded(MANIFEST_FILE, MAX_MANIFEST_BYTES)?;
     let manifest = BackupManifest::from_slice(&manifest_bytes)?;
-    require_sqlite_only_product(manifest.product)?;
+    ensure!(
+        manifest.product == product,
+        "SQLite backup product does not match the explicit product"
+    );
+    ensure!(
+        manifest.application_version == official.application_version,
+        "SQLite backup version is not the official current version for {product}"
+    );
     ensure!(
         manifest.resources.len() == 1,
         "SQLite-only backup must declare exactly one resource"
@@ -139,7 +209,7 @@ pub fn verify_sqlite_backup(input: &Path) -> anyhow::Result<VerifiedSqliteBackup
         sha256 == resource.sha256,
         "SQLite backup checksum does not match its manifest"
     );
-    let identity = verify_current_database(&database_path, manifest.product)?;
+    let identity = verify_official_sqlite_database(&database_path, product)?;
     ensure!(
         manifest.schema_identity.as_ref() == Some(&identity),
         "SQLite backup schema identity does not match its manifest"
@@ -153,6 +223,15 @@ pub fn verify_sqlite_backup(input: &Path) -> anyhow::Result<VerifiedSqliteBackup
         directory: absolute_path(input)?,
         manifest,
     })
+}
+
+fn verify_official_sqlite_database(
+    database: &Path,
+    product: Product,
+) -> anyhow::Result<SchemaIdentity> {
+    let identity = verify_current_database(database, product)?;
+    verify_official_sqlite_identity(product, &identity)?;
+    Ok(identity)
 }
 
 /// Calculate the canonical current-schema fingerprint used by every product.
@@ -737,35 +816,88 @@ fn secure_resolve_flags() -> ResolveFlags {
 mod tests {
     use super::*;
 
+    const HOST_CURRENT_SCHEMA_SQL: &str = include_str!("upgrades/host_0_6_to_0_7/target.sql");
+    const SUNSHINE_CURRENT_SCHEMA_SQL: &str =
+        include_str!("upgrades/sunshine_0_6_to_0_7/target.sql");
+
     pub(super) fn create_current_database(path: &Path, product: Product, version: &str) {
+        let official = official_sqlite_identity(product).unwrap();
+        let schema = match product {
+            Product::HostMonitoring => HOST_CURRENT_SCHEMA_SQL,
+            Product::SunshineManager => SUNSHINE_CURRENT_SCHEMA_SQL,
+            _ => panic!("test fixture supports only generic SQLite products"),
+        };
         let connection = Connection::open(path).unwrap();
         connection
-            .execute_batch(
-                "PRAGMA foreign_keys=ON;
-                 CREATE TABLE product_metadata (
-                   singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton=1),
-                   application TEXT NOT NULL,
-                   application_version TEXT NOT NULL,
-                   schema_revision INTEGER NOT NULL,
-                   schema_sha256 TEXT NOT NULL
-                 );
-                 CREATE TABLE widgets (
-                   id INTEGER PRIMARY KEY,
-                   parent_id INTEGER REFERENCES widgets(id),
-                   name TEXT NOT NULL
-                 );
-                 CREATE INDEX widgets_name_idx ON widgets(name);",
-            )
+            .pragma_update(None, "foreign_keys", "ON")
             .unwrap();
+        connection.execute_batch(schema).unwrap();
+        connection.execute_batch(PRODUCT_METADATA_DDL).unwrap();
         let fingerprint = schema_fingerprint_connection(&connection).unwrap();
+        assert_eq!(fingerprint, official.schema_sha256);
         connection
             .execute(
                 "INSERT INTO product_metadata (
                    singleton, application, application_version, schema_revision, schema_sha256
-                 ) VALUES (1, ?1, ?2, 1, ?3)",
-                (product.slug(), version, fingerprint),
+                 ) VALUES (1, ?1, ?2, ?3, ?4)",
+                (
+                    product.slug(),
+                    version,
+                    i64::try_from(official.schema_revision).unwrap(),
+                    fingerprint,
+                ),
             )
             .unwrap();
+    }
+
+    pub(super) fn insert_test_record(path: &Path, product: Product, value: &str) {
+        let connection = Connection::open(path).unwrap();
+        match product {
+            Product::HostMonitoring => {
+                connection
+                    .execute(
+                        "INSERT INTO audit_events (action,target,actor,created_at)
+                         VALUES (?1,'fixture','test','2026-01-01T00:00:00Z')",
+                        [value],
+                    )
+                    .unwrap();
+            }
+            Product::SunshineManager => {
+                connection
+                    .execute(
+                        "INSERT INTO audit_logs (action,target,actor,created_at_micros)
+                         VALUES (?1,'fixture','test',1)",
+                        [value],
+                    )
+                    .unwrap();
+            }
+            _ => panic!("test fixture supports only generic SQLite products"),
+        }
+    }
+
+    pub(super) fn test_record_count(path: &Path, product: Product) -> i64 {
+        let table = match product {
+            Product::HostMonitoring => "audit_events",
+            Product::SunshineManager => "audit_logs",
+            _ => panic!("test fixture supports only generic SQLite products"),
+        };
+        Connection::open(path)
+            .unwrap()
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap()
+    }
+
+    fn assert_backup_rejected_without_database_change(
+        database: &Path,
+        product: Product,
+        output: &Path,
+    ) {
+        let before = fs::read(database).unwrap();
+        assert!(create_sqlite_backup(product, database, output).is_err());
+        assert_eq!(fs::read(database).unwrap(), before);
+        assert!(!output.exists());
     }
 
     #[test]
@@ -777,17 +909,113 @@ mod tests {
 
         let backup = create_sqlite_backup(Product::HostMonitoring, &database, &output).unwrap();
         assert_eq!(backup.manifest.application_version, "0.7.0");
-        verify_sqlite_backup(&output).unwrap();
+        verify_sqlite_backup(Product::HostMonitoring, &output).unwrap();
 
-        let source = Connection::open(&database).unwrap();
-        source
-            .execute("INSERT INTO widgets (name) VALUES ('later')", [])
+        insert_test_record(&database, Product::HostMonitoring, "later");
+        assert_eq!(
+            test_record_count(&output.join(DATABASE_FILE), Product::HostMonitoring),
+            0
+        );
+    }
+
+    #[test]
+    fn official_allowlist_accepts_exact_host_and_sunshine_identities() {
+        for product in [Product::HostMonitoring, Product::SunshineManager] {
+            let root = tempfile::tempdir().unwrap();
+            let database = root.path().join("current.sqlite3");
+            let output = root.path().join("backup");
+            let official = official_sqlite_identity(product).unwrap();
+            create_current_database(&database, product, official.application_version);
+
+            let created = create_sqlite_backup(product, &database, &output).unwrap();
+            let identity = created.manifest.schema_identity.as_ref().unwrap();
+            assert_eq!(identity.application, product.slug());
+            assert_eq!(identity.application_version, official.application_version);
+            assert_eq!(identity.schema_revision, official.schema_revision);
+            assert_eq!(identity.schema_sha256, official.schema_sha256);
+            verify_sqlite_backup(product, &output).unwrap();
+        }
+    }
+
+    #[test]
+    fn rejects_wrong_version_revision_and_self_consistent_unknown_schema() {
+        let root = tempfile::tempdir().unwrap();
+
+        let wrong_version = root.path().join("wrong-version.sqlite3");
+        create_current_database(&wrong_version, Product::HostMonitoring, "0.7.1");
+        assert_backup_rejected_without_database_change(
+            &wrong_version,
+            Product::HostMonitoring,
+            &root.path().join("wrong-version-backup"),
+        );
+
+        let wrong_revision = root.path().join("wrong-revision.sqlite3");
+        create_current_database(&wrong_revision, Product::HostMonitoring, "0.7.0");
+        Connection::open(&wrong_revision)
+            .unwrap()
+            .execute("UPDATE product_metadata SET schema_revision=2", [])
             .unwrap();
-        let snapshot = Connection::open(output.join(DATABASE_FILE)).unwrap();
-        let rows: i64 = snapshot
-            .query_row("SELECT COUNT(*) FROM widgets", [], |row| row.get(0))
+        assert_backup_rejected_without_database_change(
+            &wrong_revision,
+            Product::HostMonitoring,
+            &root.path().join("wrong-revision-backup"),
+        );
+
+        let unknown_schema = root.path().join("unknown-schema.sqlite3");
+        create_current_database(&unknown_schema, Product::HostMonitoring, "0.7.0");
+        let connection = Connection::open(&unknown_schema).unwrap();
+        connection
+            .execute_batch("CREATE TABLE internally_consistent_unknown (id INTEGER PRIMARY KEY);")
             .unwrap();
-        assert_eq!(rows, 0);
+        let unknown_sha = schema_fingerprint_connection(&connection).unwrap();
+        assert_ne!(unknown_sha, HOST_CURRENT_SCHEMA_SHA256);
+        connection
+            .execute(
+                "UPDATE product_metadata SET schema_sha256=?1",
+                [&unknown_sha],
+            )
+            .unwrap();
+        drop(connection);
+        assert_backup_rejected_without_database_change(
+            &unknown_schema,
+            Product::HostMonitoring,
+            &root.path().join("unknown-schema-backup"),
+        );
+    }
+
+    #[test]
+    fn verify_rejects_tampered_manifest_and_cross_product_selection() {
+        let root = tempfile::tempdir().unwrap();
+        let database = root.path().join("host.sqlite3");
+        let backup = root.path().join("backup");
+        create_current_database(&database, Product::HostMonitoring, "0.7.0");
+        create_sqlite_backup(Product::HostMonitoring, &database, &backup).unwrap();
+
+        assert!(verify_sqlite_backup(Product::SunshineManager, &backup).is_err());
+        let manifest_path = backup.join(MANIFEST_FILE);
+        let original = fs::read(&manifest_path).unwrap();
+        let mut manifest: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        manifest["schema_identity"]["schema_revision"] = serde_json::json!(2);
+        fs::write(
+            &manifest_path,
+            serde_json::to_vec_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+        assert!(verify_sqlite_backup(Product::HostMonitoring, &backup).is_err());
+
+        let mut cross_product: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        cross_product["product"] = serde_json::json!("sunshine-manager");
+        cross_product["application_version"] = serde_json::json!("0.7.0");
+        cross_product["schema_identity"]["application"] = serde_json::json!("sunshine-manager");
+        cross_product["schema_identity"]["schema_sha256"] =
+            serde_json::json!(SUNSHINE_CURRENT_SCHEMA_SHA256);
+        fs::write(
+            &manifest_path,
+            serde_json::to_vec_pretty(&cross_product).unwrap(),
+        )
+        .unwrap();
+        assert!(verify_sqlite_backup(Product::HostMonitoring, &backup).is_err());
+        assert!(verify_sqlite_backup(Product::SunshineManager, &backup).is_err());
     }
 
     #[test]
@@ -824,7 +1052,7 @@ mod tests {
         create_current_database(&database, Product::HostMonitoring, "0.7.0");
         create_sqlite_backup(Product::HostMonitoring, &database, &first).unwrap();
         fs::write(first.join("unexpected"), b"no").unwrap();
-        assert!(verify_sqlite_backup(&first).is_err());
+        assert!(verify_sqlite_backup(Product::HostMonitoring, &first).is_err());
 
         create_sqlite_backup(Product::HostMonitoring, &database, &second).unwrap();
         OpenOptions::new()
@@ -833,7 +1061,7 @@ mod tests {
             .unwrap()
             .write_all(b"corruption")
             .unwrap();
-        assert!(verify_sqlite_backup(&second).is_err());
+        assert!(verify_sqlite_backup(Product::HostMonitoring, &second).is_err());
     }
 
     #[test]
@@ -876,7 +1104,7 @@ mod tests {
         create_current_database(&database, Product::HostMonitoring, "0.7.0");
         Connection::open(&database)
             .unwrap()
-            .execute_batch("ALTER TABLE widgets ADD COLUMN drift TEXT;")
+            .execute_batch("CREATE TABLE schema_drift (id INTEGER PRIMARY KEY);")
             .unwrap();
 
         assert!(create_sqlite_backup(Product::HostMonitoring, &database, &output).is_err());
