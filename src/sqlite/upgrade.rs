@@ -20,7 +20,7 @@ use sha2::{Digest, Sha384};
 use super::{
     DATABASE_FILE, MANIFEST_FILE, MAX_MANIFEST_BYTES, MaintenanceLock, PendingDirectory,
     SecureDirectory, copy_database_online, hash_regular_file, open_read_only,
-    restore::{RestorePoint, replace_with_staged_database},
+    restore::{RestorePoint, recover_sqlite_restore_under_lock, replace_with_staged_database},
     schema_fingerprint_connection, secure_resolve_flags, sync_directory, verify_current_database,
     write_manifest,
 };
@@ -30,7 +30,15 @@ use crate::{
 };
 
 mod host_0_6_to_0_7;
+mod sentinel_0_1_to_0_2;
 mod sunshine_0_6_to_0_7;
+
+pub use sentinel_0_1_to_0_2::{
+    SentinelCompanionContract, SentinelRecordingArchive, SentinelRecoveryOptions,
+    SentinelSourceBackupManifest, SentinelStoredFile, SentinelUpgradeOptions,
+    SentinelUpgradeResult, VerifiedSentinelSourceBackup, recover_sentinel_upgrade,
+    sentinel_credentials_key_from_file, upgrade_sentinel, verify_sentinel_source_backup,
+};
 
 const PRODUCT_METADATA_DDL: &str = "CREATE TABLE product_metadata (\n\
     singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton=1),\n\

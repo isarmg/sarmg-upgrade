@@ -50,6 +50,19 @@ isarmg-upgrade upgrade-sqlite --product sunshine-manager \\
   --from-version 0.6.0 --to-version 0.7.0 \\
   --database /var/lib/isarmg/sunshine-manager/app.sqlite3 \\
   --backup-output /srv/backup/sunshine-manager-0.6.0-before-upgrade
+isarmg-upgrade upgrade-sentinel --product sentinel-monitor \\
+  --from-version 0.1.0 --to-version 0.2.0 \\
+  --database /var/lib/isarmg/sentinel-monitor/app.sqlite3 \\
+  --runtime-directory /run/isarmg/sentinel-monitor \\
+  --mediamtx-config /etc/isarmg/sentinel-monitor/mediamtx.yml \\
+  --mediamtx-contract /var/lib/isarmg/sentinel-monitor/mediamtx.lock \\
+  --recordings-directory /var/lib/isarmg/sentinel-monitor/recordings \\
+  --credentials-key-file /run/credentials/sentinel.key \\
+  --backup-output /srv/backup/sentinel-monitor-0.1.0-before-upgrade
+isarmg-upgrade verify-sentinel-source-backup --product sentinel-monitor \\
+  --from-version 0.1.0 --to-version 0.2.0 \\
+  --input /srv/backup/sentinel-monitor-0.1.0-before-upgrade \\
+  --credentials-key-file /run/credentials/sentinel.key
 ```
 
 Replacing an existing database is never implicit. Restore stages and verifies
@@ -63,16 +76,39 @@ isarmg-upgrade recover-sqlite --recovery /path/from/error --action rollback
 ```
 
 The registered adapters support exactly Host Monitoring `0.6.0 -> 0.7.0` and
-Sunshine Manager `0.6.0 -> 0.7.0`. They validate their respective five-row and
-four-row SQLx ledgers and SHA-384 checksums, clone the source generation without
-opening it, publish a verified old-generation backup, create the consolidated
-`0.7.0` schema in a same-filesystem staging directory, and copy every table
-through explicit column lists. They do not run `ALTER TABLE` against the source.
+Sunshine Manager `0.6.0 -> 0.7.0`, plus the composite Sentinel Monitor
+`0.1.0 -> 0.2.0` adapter. They validate their exact SQLx ledgers and SHA-384
+checksums, clone the source generation without opening it, publish a verified
+old-generation backup, create the current schema in a same-filesystem staging
+directory, and copy every table through explicit column lists. They do not run
+`ALTER TABLE` against the source.
+
+The Sentinel adapter obtains the database maintenance, Sentinel runtime, and
+MediaMTX locks in that order. Its immutable backup contains the old SQLite
+database, exact MediaMTX config and companion contract, and every recording
+file and empty directory with a checksummed inventory. The credentials key is
+required only to prove that every encrypted camera value is decryptable; its
+file must grant no group or other access, and the key is never copied into the
+backup, journal, manifest, or command output. The manifest stores only its
+non-secret SHA-256 identifier so verification and future restore can require
+the exact external key.
+MediaMTX resources do not change between these two versions, so the journaled
+switch mutates only the database after confirming that config, contract, and
+recordings remain byte-identical. Resolve an interrupted switch while both
+services remain stopped:
+
+```console
+isarmg-upgrade recover-sentinel-upgrade --product sentinel-monitor \\
+  --from-version 0.1.0 --to-version 0.2.0 \\
+  --database /var/lib/isarmg/sentinel-monitor/app.sqlite3 \\
+  --runtime-directory /run/isarmg/sentinel-monitor \\
+  --recovery /path/from/error --action commit
+```
 
 The generic SQLite-only backup command supports Host Monitoring and Sunshine
-Manager current databases. Composite Photo, Sentinel, and Dufs commands are
-added only together with their tested product adapters. This avoids advertising
-an unsafe generic migration.
+Manager current databases. Sentinel has only the exact composite command above;
+Photo and Dufs commands are added only together with tested product adapters.
+This avoids advertising an unsafe generic migration.
 
 ## Development
 

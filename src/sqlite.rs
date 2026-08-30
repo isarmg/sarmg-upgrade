@@ -32,7 +32,11 @@ pub use restore::{
     restore_sqlite_backup,
 };
 pub use upgrade::{
-    SqliteUpgradeResult, VerifiedSourceBackup, upgrade_sqlite, verify_source_backup,
+    SentinelCompanionContract, SentinelRecordingArchive, SentinelRecoveryOptions,
+    SentinelSourceBackupManifest, SentinelStoredFile, SentinelUpgradeOptions,
+    SentinelUpgradeResult, SqliteUpgradeResult, VerifiedSentinelSourceBackup, VerifiedSourceBackup,
+    recover_sentinel_upgrade, sentinel_credentials_key_from_file, upgrade_sentinel, upgrade_sqlite,
+    verify_sentinel_source_backup, verify_source_backup,
 };
 
 const DATABASE_FILE: &str = "database.sqlite3";
@@ -512,8 +516,18 @@ impl DatabaseLocation {
         let metadata = fstat(&fd)?;
         ensure!(
             FileType::from_raw_mode(metadata.st_mode) == FileType::RegularFile
-                && metadata.st_nlink == 1,
-            "maintenance lock must be one regular file"
+                && metadata.st_nlink == 1
+                && metadata.st_mode & 0o077 == 0,
+            "maintenance lock must be one private regular file"
+        );
+        let named = statat(&self.parent, &lock_name, AtFlags::SYMLINK_NOFOLLOW)?;
+        ensure!(
+            FileType::from_raw_mode(named.st_mode) == FileType::RegularFile
+                && named.st_nlink == 1
+                && named.st_mode & 0o077 == 0
+                && named.st_dev == metadata.st_dev
+                && named.st_ino == metadata.st_ino,
+            "maintenance lock path changed while it was opened"
         );
         match flock(&fd, operation) {
             Ok(()) => Ok(File::from(fd)),

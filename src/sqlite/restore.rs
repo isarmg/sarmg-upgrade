@@ -181,6 +181,53 @@ pub fn recover_sqlite_restore(
         .context("recovery directory must have a parent")?
         .join(&journal.destination_name);
     let maintenance = MaintenanceLock::exclusive(journal.product, &destination)?;
+    recover_sqlite_restore_locked(recovery, journal, destination, &maintenance, action)
+}
+
+pub(super) fn recover_sqlite_restore_under_lock(
+    recovery_path: &Path,
+    expected_product: Product,
+    expected_database: &Path,
+    expected_identity: &SchemaIdentity,
+    maintenance: &MaintenanceLock,
+    action: RecoveryAction,
+) -> anyhow::Result<RecoveryResult> {
+    let recovery = RecoveryDirectory::open(recovery_path)?;
+    let journal = recovery.read_journal()?;
+    journal.validate()?;
+    recovery.validate_name(&journal)?;
+    ensure!(
+        journal.product == expected_product,
+        "recovery journal belongs to a different product"
+    );
+    ensure!(
+        &journal.schema_identity == expected_identity
+            && journal.application_version == expected_identity.application_version,
+        "recovery journal belongs to a different target generation"
+    );
+    let destination = recovery
+        .configured_path
+        .parent()
+        .context("recovery directory must have a parent")?
+        .join(&journal.destination_name);
+    ensure!(
+        absolute_path(expected_database)? == destination,
+        "recovery journal destination does not match the explicit database"
+    );
+    recover_sqlite_restore_locked(recovery, journal, destination, maintenance, action)
+}
+
+fn recover_sqlite_restore_locked(
+    recovery: RecoveryDirectory,
+    journal: RestoreJournal,
+    destination: PathBuf,
+    maintenance: &MaintenanceLock,
+    action: RecoveryAction,
+) -> anyhow::Result<RecoveryResult> {
+    ensure!(
+        maintenance.location.database_name == OsStr::new(&journal.destination_name),
+        "maintenance lock targets a different database"
+    );
     ensure_same_directory(&recovery.parent.file, &maintenance.location.parent)?;
 
     match action {

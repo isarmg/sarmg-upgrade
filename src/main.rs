@@ -3,9 +3,10 @@ use std::path::PathBuf;
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use isarmg_upgrade::{
-    BackupManifest, Product, RecoveryAction, RestoreExisting, create_sqlite_backup,
-    recover_sqlite_restore, restore_sqlite_backup, upgrade_sqlite, verify_source_backup,
-    verify_sqlite_backup,
+    BackupManifest, Product, RecoveryAction, RestoreExisting, SentinelRecoveryOptions,
+    SentinelUpgradeOptions, create_sqlite_backup, recover_sentinel_upgrade, recover_sqlite_restore,
+    restore_sqlite_backup, sentinel_credentials_key_from_file, upgrade_sentinel, upgrade_sqlite,
+    verify_sentinel_source_backup, verify_source_backup, verify_sqlite_backup,
 };
 
 #[derive(Debug, Parser)]
@@ -86,6 +87,59 @@ enum Command {
         #[arg(long, value_name = "SOURCE_BACKUP_DIRECTORY")]
         input: PathBuf,
     },
+    /// Upgrade the exact Sentinel SQLite, MediaMTX, and recording generation offline.
+    UpgradeSentinel {
+        #[arg(long)]
+        product: Product,
+        #[arg(long)]
+        from_version: String,
+        #[arg(long)]
+        to_version: String,
+        #[arg(long, value_name = "DATABASE")]
+        database: PathBuf,
+        #[arg(long, value_name = "NEW_COMPOSITE_BACKUP_DIRECTORY")]
+        backup_output: PathBuf,
+        #[arg(long, value_name = "RUNTIME_DIRECTORY")]
+        runtime_directory: PathBuf,
+        #[arg(long, value_name = "MEDIAMTX_CONFIG")]
+        mediamtx_config: PathBuf,
+        #[arg(long, value_name = "MEDIAMTX_CONTRACT")]
+        mediamtx_contract: PathBuf,
+        #[arg(long, value_name = "RECORDINGS_DIRECTORY")]
+        recordings_directory: PathBuf,
+        #[arg(long, value_name = "BASE64_KEY_FILE")]
+        credentials_key_file: PathBuf,
+    },
+    /// Verify an immutable Sentinel old-generation composite backup.
+    VerifySentinelSourceBackup {
+        #[arg(long)]
+        product: Product,
+        #[arg(long)]
+        from_version: String,
+        #[arg(long)]
+        to_version: String,
+        #[arg(long, value_name = "SOURCE_BACKUP_DIRECTORY")]
+        input: PathBuf,
+        #[arg(long, value_name = "BASE64_KEY_FILE")]
+        credentials_key_file: PathBuf,
+    },
+    /// Finish or roll back an interrupted exact Sentinel upgrade.
+    RecoverSentinelUpgrade {
+        #[arg(long)]
+        product: Product,
+        #[arg(long)]
+        from_version: String,
+        #[arg(long)]
+        to_version: String,
+        #[arg(long, value_name = "DATABASE")]
+        database: PathBuf,
+        #[arg(long, value_name = "RUNTIME_DIRECTORY")]
+        runtime_directory: PathBuf,
+        #[arg(long, value_name = "RECOVERY_DIRECTORY")]
+        recovery: PathBuf,
+        #[arg(long)]
+        action: RecoveryAction,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -158,6 +212,73 @@ fn main() -> anyhow::Result<()> {
         } => {
             let backup = verify_source_backup(product, &from_version, &to_version, &input)?;
             println!("{}", serde_json::to_string_pretty(&backup.manifest)?);
+            Ok(())
+        }
+        Command::UpgradeSentinel {
+            product,
+            from_version,
+            to_version,
+            database,
+            backup_output,
+            runtime_directory,
+            mediamtx_config,
+            mediamtx_contract,
+            recordings_directory,
+            credentials_key_file,
+        } => {
+            let credentials_key = sentinel_credentials_key_from_file(&credentials_key_file)?;
+            let result = upgrade_sentinel(&SentinelUpgradeOptions {
+                product,
+                from_version,
+                to_version,
+                database,
+                backup_output,
+                runtime_directory,
+                mediamtx_config,
+                mediamtx_contract,
+                recordings_directory,
+                credentials_key,
+            })?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
+        Command::VerifySentinelSourceBackup {
+            product,
+            from_version,
+            to_version,
+            input,
+            credentials_key_file,
+        } => {
+            let credentials_key = sentinel_credentials_key_from_file(&credentials_key_file)?;
+            let backup = verify_sentinel_source_backup(
+                product,
+                &from_version,
+                &to_version,
+                &input,
+                &credentials_key,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&backup.manifest)?);
+            Ok(())
+        }
+        Command::RecoverSentinelUpgrade {
+            product,
+            from_version,
+            to_version,
+            database,
+            runtime_directory,
+            recovery,
+            action,
+        } => {
+            let result = recover_sentinel_upgrade(&SentinelRecoveryOptions {
+                product,
+                from_version,
+                to_version,
+                database,
+                runtime_directory,
+                recovery_directory: recovery,
+                action,
+            })?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
             Ok(())
         }
     }
