@@ -34,6 +34,21 @@ isarmg-upgrade backup-sqlite --product host-monitoring \\
   --database /var/lib/isarmg/host-monitoring/app.sqlite3 \\
   --output /srv/backup/host-monitoring-0.7.0
 isarmg-upgrade verify-sqlite /srv/backup/host-monitoring-0.7.0
+isarmg-upgrade restore-sqlite --product host-monitoring \\
+  --expect-version 0.7.0 \\
+  --input /srv/backup/host-monitoring-0.7.0 \\
+  --database /var/lib/isarmg/host-monitoring/app.sqlite3 \\
+  --replace-existing
+```
+
+Replacing an existing database is never implicit. Restore stages and verifies
+the incoming database, preserves the old database plus SQLite sidecars in a
+durable adjacent journal, and only then installs it. If a process is interrupted
+after mutation, the error prints the recovery directory; resolve it explicitly:
+
+```console
+isarmg-upgrade recover-sqlite --recovery /path/from/error --action commit
+isarmg-upgrade recover-sqlite --recovery /path/from/error --action rollback
 ```
 
 The SQLite-only command supports Host Monitoring and Sunshine Manager. Composite

@@ -25,6 +25,12 @@ use crate::{
     manifest::MANIFEST_VERSION,
 };
 
+mod restore;
+pub use restore::{
+    RecoveryAction, RecoveryResult, RestoreExisting, RestoreResult, recover_sqlite_restore,
+    restore_sqlite_backup,
+};
+
 const DATABASE_FILE: &str = "database.sqlite3";
 const MANIFEST_FILE: &str = "manifest.json";
 const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
@@ -432,10 +438,19 @@ fn absolute_path(path: &Path) -> anyhow::Result<PathBuf> {
 struct DatabaseLocation {
     parent: File,
     database_name: OsString,
+    configured_database: PathBuf,
 }
 
 impl DatabaseLocation {
     fn resolve(database: &Path) -> anyhow::Result<Self> {
+        Self::resolve_with_requirement(database, true)
+    }
+
+    fn resolve_target(database: &Path) -> anyhow::Result<Self> {
+        Self::resolve_with_requirement(database, false)
+    }
+
+    fn resolve_with_requirement(database: &Path, must_exist: bool) -> anyhow::Result<Self> {
         let database = absolute_path(database)?;
         let parent = SecureDirectory::open(
             database.parent().context("database must have a parent")?,
@@ -445,10 +460,22 @@ impl DatabaseLocation {
             .file_name()
             .context("database must name a file")?
             .to_os_string();
-        parent.require_regular_child(&database_name, "SQLite database")?;
+        match statat(&parent.file, &database_name, AtFlags::SYMLINK_NOFOLLOW) {
+            Ok(metadata) => ensure!(
+                FileType::from_raw_mode(metadata.st_mode) == FileType::RegularFile
+                    && metadata.st_nlink == 1,
+                "SQLite database must be one regular file"
+            ),
+            Err(Errno::NOENT) if !must_exist => {}
+            Err(Errno::NOENT) => anyhow::bail!("SQLite database does not exist"),
+            Err(error) => {
+                return Err(std::io::Error::from(error)).context("inspect SQLite database");
+            }
+        }
         Ok(Self {
             parent: parent.file,
             database_name,
+            configured_database: database,
         })
     }
 
@@ -458,6 +485,10 @@ impl DatabaseLocation {
 
     fn database_path(&self) -> PathBuf {
         self.child_path(&self.database_name)
+    }
+
+    fn configured_database_path(&self) -> &Path {
+        &self.configured_database
     }
 
     fn acquire_lock(&self, product: Product, operation: FlockOperation) -> anyhow::Result<File> {
@@ -499,6 +530,15 @@ impl MaintenanceLock {
     fn shared(product: Product, database: &Path) -> anyhow::Result<Self> {
         let location = DatabaseLocation::resolve(database)?;
         let file = location.acquire_lock(product, FlockOperation::NonBlockingLockShared)?;
+        Ok(Self {
+            location,
+            _file: file,
+        })
+    }
+
+    fn exclusive(product: Product, database: &Path) -> anyhow::Result<Self> {
+        let location = DatabaseLocation::resolve_target(database)?;
+        let file = location.acquire_lock(product, FlockOperation::NonBlockingLockExclusive)?;
         Ok(Self {
             location,
             _file: file,
@@ -679,7 +719,7 @@ fn secure_resolve_flags() -> ResolveFlags {
 mod tests {
     use super::*;
 
-    fn create_current_database(path: &Path, product: Product, version: &str) {
+    pub(super) fn create_current_database(path: &Path, product: Product, version: &str) {
         let connection = Connection::open(path).unwrap();
         connection
             .execute_batch(

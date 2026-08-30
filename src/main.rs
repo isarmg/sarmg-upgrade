@@ -2,7 +2,10 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use isarmg_upgrade::{BackupManifest, Product, create_sqlite_backup, verify_sqlite_backup};
+use isarmg_upgrade::{
+    BackupManifest, Product, RecoveryAction, RestoreExisting, create_sqlite_backup,
+    recover_sqlite_restore, restore_sqlite_backup, verify_sqlite_backup,
+};
 
 #[derive(Debug, Parser)]
 #[command(name = "isarmg-upgrade", version, about)]
@@ -38,6 +41,26 @@ enum Command {
         #[arg(value_name = "BACKUP_DIRECTORY")]
         input: PathBuf,
     },
+    /// Restore one SQLite-only backup under an exclusive maintenance lock.
+    RestoreSqlite {
+        #[arg(long)]
+        product: Product,
+        #[arg(long)]
+        expect_version: String,
+        #[arg(long, value_name = "BACKUP_DIRECTORY")]
+        input: PathBuf,
+        #[arg(long, value_name = "DATABASE")]
+        database: PathBuf,
+        #[arg(long)]
+        replace_existing: bool,
+    },
+    /// Finish or roll back an interrupted SQLite restore journal.
+    RecoverSqlite {
+        #[arg(long, value_name = "RECOVERY_DIRECTORY")]
+        recovery: PathBuf,
+        #[arg(long)]
+        action: RecoveryAction,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -61,6 +84,28 @@ fn main() -> anyhow::Result<()> {
         Command::VerifySqlite { input } => {
             let backup = verify_sqlite_backup(&input)?;
             println!("{}", serde_json::to_string_pretty(&backup.manifest)?);
+            Ok(())
+        }
+        Command::RestoreSqlite {
+            product,
+            expect_version,
+            input,
+            database,
+            replace_existing,
+        } => {
+            let existing = if replace_existing {
+                RestoreExisting::Replace
+            } else {
+                RestoreExisting::Refuse
+            };
+            let result =
+                restore_sqlite_backup(product, &expect_version, &input, &database, existing)?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
+        Command::RecoverSqlite { recovery, action } => {
+            let result = recover_sqlite_restore(&recovery, action)?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
             Ok(())
         }
     }

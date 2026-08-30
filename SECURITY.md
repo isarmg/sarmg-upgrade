@@ -9,6 +9,10 @@ fields, unknown versions, path traversal, checksum mismatches, and incomplete
 backup directories as fatal errors. Output and restore destinations are never
 silently overwritten.
 
+An interrupted restore is not guessed forward or backward. Preserve its
+adjacent recovery directory and run `recover-sqlite` with an explicit `commit`
+or `rollback` decision while the service remains stopped.
+
 Report vulnerabilities privately to `isarmg@163.com`. Do not attach production
 databases, credentials, recordings, or backup manifests containing private path
 information to a public report.
