@@ -7,7 +7,8 @@ pub mod sqlite;
 pub use catalog::{Product, ProductContract, ResourceKind};
 pub use manifest::{BackupManifest, ManifestError, ResourceEntry, SchemaIdentity};
 pub use sqlite::{
-    RecoveryAction, RecoveryResult, RestoreExisting, RestoreResult, VerifiedSqliteBackup,
-    create_sqlite_backup, recover_sqlite_restore, restore_sqlite_backup, schema_fingerprint,
+    RecoveryAction, RecoveryResult, RestoreExisting, RestoreResult, SqliteUpgradeResult,
+    VerifiedSourceBackup, VerifiedSqliteBackup, create_sqlite_backup, recover_sqlite_restore,
+    restore_sqlite_backup, schema_fingerprint, upgrade_sqlite, verify_source_backup,
     verify_sqlite_backup,
 };

@@ -4,7 +4,8 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 use isarmg_upgrade::{
     BackupManifest, Product, RecoveryAction, RestoreExisting, create_sqlite_backup,
-    recover_sqlite_restore, restore_sqlite_backup, verify_sqlite_backup,
+    recover_sqlite_restore, restore_sqlite_backup, upgrade_sqlite, verify_source_backup,
+    verify_sqlite_backup,
 };
 
 #[derive(Debug, Parser)]
@@ -61,6 +62,30 @@ enum Command {
         #[arg(long)]
         action: RecoveryAction,
     },
+    /// Run one explicitly selected, exact SQLite version adapter offline.
+    UpgradeSqlite {
+        #[arg(long)]
+        product: Product,
+        #[arg(long)]
+        from_version: String,
+        #[arg(long)]
+        to_version: String,
+        #[arg(long, value_name = "DATABASE")]
+        database: PathBuf,
+        #[arg(long, value_name = "NEW_SOURCE_BACKUP_DIRECTORY")]
+        backup_output: PathBuf,
+    },
+    /// Verify the old-generation backup for one exact SQLite adapter.
+    VerifySourceBackup {
+        #[arg(long)]
+        product: Product,
+        #[arg(long)]
+        from_version: String,
+        #[arg(long)]
+        to_version: String,
+        #[arg(long, value_name = "SOURCE_BACKUP_DIRECTORY")]
+        input: PathBuf,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -106,6 +131,33 @@ fn main() -> anyhow::Result<()> {
         Command::RecoverSqlite { recovery, action } => {
             let result = recover_sqlite_restore(&recovery, action)?;
             println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
+        Command::UpgradeSqlite {
+            product,
+            from_version,
+            to_version,
+            database,
+            backup_output,
+        } => {
+            let result = upgrade_sqlite(
+                product,
+                &from_version,
+                &to_version,
+                &database,
+                &backup_output,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
+        Command::VerifySourceBackup {
+            product,
+            from_version,
+            to_version,
+            input,
+        } => {
+            let backup = verify_source_backup(product, &from_version, &to_version, &input)?;
+            println!("{}", serde_json::to_string_pretty(&backup.manifest)?);
             Ok(())
         }
     }

@@ -26,9 +26,13 @@ use crate::{
 };
 
 mod restore;
+mod upgrade;
 pub use restore::{
     RecoveryAction, RecoveryResult, RestoreExisting, RestoreResult, recover_sqlite_restore,
     restore_sqlite_backup,
+};
+pub use upgrade::{
+    SqliteUpgradeResult, VerifiedSourceBackup, upgrade_sqlite, verify_source_backup,
 };
 
 const DATABASE_FILE: &str = "database.sqlite3";

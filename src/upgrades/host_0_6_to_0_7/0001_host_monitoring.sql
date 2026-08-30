@@ -1,0 +1,100 @@
+CREATE TABLE monitored_hosts (
+    host_id                  TEXT PRIMARY KEY,
+    name                     TEXT NOT NULL,
+    os                       TEXT NOT NULL,
+    os_version               TEXT,
+    kernel_version           TEXT,
+    arch                     TEXT NOT NULL,
+    agent_version            TEXT NOT NULL,
+    capabilities             TEXT NOT NULL DEFAULT '[]',
+    registered_at            TEXT NOT NULL,
+    last_seen_at             TEXT NOT NULL,
+    latest_report_id         TEXT,
+    latest_collected_at      TEXT,
+    latest_interval_seconds  REAL,
+    lifecycle_status         TEXT NOT NULL DEFAULT 'active',
+    revoked_at               TEXT
+);
+
+CREATE INDEX monitored_hosts_registered ON monitored_hosts(registered_at, host_id);
+CREATE INDEX monitored_hosts_last_seen ON monitored_hosts(last_seen_at DESC);
+
+CREATE TABLE agent_metric_reports (
+    report_id                             TEXT PRIMARY KEY,
+    host_id                               TEXT NOT NULL REFERENCES monitored_hosts(host_id) ON DELETE CASCADE,
+    schema_version                        INTEGER NOT NULL,
+    collected_at                          TEXT NOT NULL,
+    received_at                           TEXT NOT NULL,
+    interval_seconds                      REAL NOT NULL,
+    payload                               TEXT,
+    cpu_usage_percent                     REAL,
+    memory_usage_percent                  REAL,
+    network_received_bytes_per_second     REAL,
+    network_transmitted_bytes_per_second  REAL,
+    disk_read_bytes_per_second            REAL,
+    disk_written_bytes_per_second         REAL,
+    max_temperature_celsius               REAL,
+    gpu_utilization_percent               REAL,
+    gpu_memory_usage_percent              REAL
+);
+
+CREATE INDEX agent_metric_reports_host_collected ON agent_metric_reports(host_id, collected_at DESC, report_id DESC);
+CREATE INDEX agent_metric_reports_received ON agent_metric_reports(received_at);
+
+CREATE TABLE agent_credentials (
+    credential_id   TEXT PRIMARY KEY,
+    host_id         TEXT NOT NULL REFERENCES monitored_hosts(host_id) ON DELETE CASCADE,
+    token_hash      TEXT NOT NULL UNIQUE,
+    issued_at       TEXT NOT NULL,
+    last_used_at    TEXT,
+    revoked_at      TEXT
+);
+
+CREATE INDEX agent_credentials_host ON agent_credentials(host_id);
+CREATE INDEX agent_credentials_active_token ON agent_credentials(token_hash) WHERE revoked_at IS NULL;
+
+CREATE TABLE agent_instance_invites (
+    invite_id             TEXT PRIMARY KEY,
+    instance_id           TEXT NOT NULL,
+    activation_code_hash  TEXT NOT NULL UNIQUE,
+    display_name          TEXT NOT NULL,
+    status                TEXT NOT NULL DEFAULT 'pending',
+    expires_at            TEXT NOT NULL,
+    created_at            TEXT NOT NULL,
+    activated_at          TEXT,
+    cancelled_at          TEXT
+);
+
+CREATE INDEX agent_instance_invites_created ON agent_instance_invites(created_at DESC);
+CREATE UNIQUE INDEX agent_instance_invites_one_pending ON agent_instance_invites(instance_id) WHERE status = 'pending';
+
+CREATE TABLE agent_pairing_requests (
+    request_id           TEXT PRIMARY KEY,
+    requested_host_id    TEXT NOT NULL,
+    os                   TEXT NOT NULL,
+    os_version           TEXT,
+    kernel_version       TEXT,
+    arch                 TEXT NOT NULL,
+    agent_version        TEXT NOT NULL,
+    token_hash           TEXT NOT NULL UNIQUE,
+    polling_secret_hash  TEXT NOT NULL UNIQUE,
+    status               TEXT NOT NULL DEFAULT 'pending',
+    invite_id            TEXT UNIQUE,
+    instance_id          TEXT,
+    expires_at           TEXT NOT NULL,
+    created_at           TEXT NOT NULL,
+    activated_at         TEXT
+);
+
+CREATE INDEX agent_pairing_requests_expiry ON agent_pairing_requests(expires_at) WHERE status = 'pending';
+
+CREATE TABLE audit_events (
+    event_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    action        TEXT NOT NULL,
+    target        TEXT NOT NULL,
+    detail        TEXT,
+    actor         TEXT NOT NULL,
+    created_at    TEXT NOT NULL
+);
+
+CREATE INDEX audit_events_created ON audit_events(created_at DESC);

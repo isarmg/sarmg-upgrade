@@ -13,6 +13,13 @@ An interrupted restore is not guessed forward or backward. Preserve its
 adjacent recovery directory and run `recover-sqlite` with an explicit `commit`
 or `rollback` decision while the service remains stopped.
 
+Version upgrades require exact `--product`, `--from-version`, and `--to-version`
+arguments. Before SQLite parses any old state, the tool byte-clones the main
+database and all present SQLite sidecars under the exclusive product maintenance
+lock. Validation, backup creation, and target construction operate on that
+clone; the original generation is touched only by the final durable recovery
+journal switch.
+
 Report vulnerabilities privately to `isarmg@163.com`. Do not attach production
 databases, credentials, recordings, or backup manifests containing private path
 information to a public report.

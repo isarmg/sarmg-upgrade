@@ -1,4 +1,5 @@
 use std::{
+    ffi::OsStr,
     fmt,
     fs::{File, OpenOptions},
     io::{Read, Write},
@@ -211,10 +212,59 @@ pub fn recover_sqlite_restore(
 }
 
 #[derive(Clone, Copy, Debug)]
-enum RestorePoint {
+pub(super) enum RestorePoint {
     OriginalsPreserved,
     Installed,
     Verified,
+}
+
+/// Replace the locked generation with one already-created current database.
+///
+/// The caller retains the exclusive maintenance lock from source validation
+/// through installation, so an upgrade cannot race a product runtime between
+/// copying data and the durable switch.
+pub(super) fn replace_with_staged_database(
+    maintenance: &MaintenanceLock,
+    staged_directory: &Path,
+    product: Product,
+    expected_identity: &SchemaIdentity,
+    hook: impl FnMut(RestorePoint) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    let originals = inspect_original_generation(&maintenance.location)?;
+    ensure!(
+        originals
+            .iter()
+            .any(|entry| OsStr::new(&entry.destination_name) == maintenance.location.database_name),
+        "upgrade source database disappeared before installation"
+    );
+    let recovery = RecoveryDirectory::create(&maintenance.location, product)?;
+    let mut mutation_started = false;
+    let attempt = restore_prepared(
+        staged_directory,
+        &maintenance.location,
+        &recovery,
+        originals,
+        product,
+        expected_identity,
+        &mut mutation_started,
+        hook,
+    );
+    match attempt {
+        Ok(()) => recovery.cleanup().with_context(|| {
+            format!(
+                "upgrade is installed and verified, but recovery cleanup is incomplete at {}",
+                recovery.configured_path.display()
+            )
+        }),
+        Err(error) if !mutation_started => {
+            let _ = recovery.cleanup();
+            Err(error.context("upgrade installation failed before the source was changed"))
+        }
+        Err(error) => Err(error.context(format!(
+            "upgrade was interrupted after source mutation; recovery evidence is preserved at {}",
+            recovery.configured_path.display()
+        ))),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
