@@ -122,7 +122,15 @@ product adapters.
 ## Development
 
 ```console
-cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-targets --all-features
+cargo +1.98.0 fmt --all -- --check
+cargo +1.98.0 check --locked --all-targets --all-features
+cargo +1.98.0 clippy --locked --all-targets --all-features -- -D warnings
+cargo +1.98.0 test --locked --all-targets --all-features
+./scripts/check-workflow-supply-chain.py
 ```
+
+The workflow policy script scans every Git-tracked workflow and rejects mutable
+action references, non-fixed runners, excessive permissions, missing job
+timeouts, and checkout credentials that would persist in the worktree. It also
+runs negative fixtures for floating actions, floating runners, and write
+permissions on every invocation.
