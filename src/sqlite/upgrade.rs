@@ -30,6 +30,7 @@ use crate::{
 };
 
 mod host_0_6_to_0_7;
+mod sunshine_0_6_to_0_7;
 
 const PRODUCT_METADATA_DDL: &str = "CREATE TABLE product_metadata (\n\
     singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton=1),\n\
@@ -74,6 +75,7 @@ impl Adapter {
     fn resolve(product: Product, from_version: &str, to_version: &str) -> anyhow::Result<Self> {
         let adapter = match (product, from_version, to_version) {
             (Product::HostMonitoring, "0.6.0", "0.7.0") => host_0_6_to_0_7::ADAPTER,
+            (Product::SunshineManager, "0.6.0", "0.7.0") => sunshine_0_6_to_0_7::ADAPTER,
             _ => anyhow::bail!(
                 "no exact SQLite adapter for {product} {from_version} -> {to_version}"
             ),
@@ -633,6 +635,10 @@ mod tests {
         host_0_6_to_0_7::create_fixture(path).unwrap();
     }
 
+    fn create_sunshine_fixture(path: &Path) {
+        sunshine_0_6_to_0_7::create_fixture(path).unwrap();
+    }
+
     fn generation_bytes(path: &Path) -> BTreeMap<String, Vec<u8>> {
         std::iter::once("")
             .chain(SQLITE_SIDECARS)
@@ -877,6 +883,128 @@ mod tests {
                 verify_source_database(&database, host_0_6_to_0_7::ADAPTER).unwrap();
             } else {
                 let identity = verify_current_database(&database, Product::HostMonitoring).unwrap();
+                assert_eq!(identity.application_version, "0.7.0");
+            }
+        }
+    }
+
+    #[test]
+    fn upgrades_real_sunshine_fixture_and_preserves_every_table() {
+        let root = tempfile::tempdir().unwrap();
+        let database = root.path().join("sunshine.sqlite3");
+        let backup = root.path().join("sunshine-0.6-backup");
+        create_sunshine_fixture(&database);
+
+        let result = upgrade_sqlite(
+            Product::SunshineManager,
+            "0.6.0",
+            "0.7.0",
+            &database,
+            &backup,
+        )
+        .unwrap();
+        assert_eq!(result.schema_identity.schema_revision, 1);
+        assert_eq!(
+            result.schema_identity.schema_sha256,
+            sunshine_0_6_to_0_7::TARGET_SCHEMA_SHA256
+        );
+        let source =
+            verify_source_backup(Product::SunshineManager, "0.6.0", "0.7.0", &backup).unwrap();
+        assert_eq!(source.manifest.schema_identity.unwrap().schema_revision, 3);
+
+        let current = Connection::open(&database).unwrap();
+        for table in sunshine_0_6_to_0_7::DATA_TABLES {
+            let rows: i64 = current
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(rows, 1, "{table}");
+        }
+        current
+            .execute(
+                "INSERT INTO audit_logs (action,target,actor,created_at_micros) VALUES ('next','x','test',12)",
+                [],
+            )
+            .unwrap();
+        let next_id: i64 = current
+            .query_row("SELECT MAX(audit_id) FROM audit_logs", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(next_id, 8);
+    }
+
+    #[test]
+    fn rejects_tampered_sunshine_ledger_without_touching_source_or_sidecar() {
+        let root = tempfile::tempdir().unwrap();
+        let database = root.path().join("sunshine.sqlite3");
+        create_sunshine_fixture(&database);
+        Connection::open(&database)
+            .unwrap()
+            .execute(
+                "UPDATE _sqlx_migrations SET installed_on='not-a-timestamp' \
+                 WHERE version=202608290002",
+                [],
+            )
+            .unwrap();
+        fs::write(
+            PathBuf::from(format!("{}-journal", database.display())),
+            b"ignored-non-hot-journal",
+        )
+        .unwrap();
+        let before = generation_bytes(&database);
+        assert!(
+            upgrade_sqlite(
+                Product::SunshineManager,
+                "0.6.0",
+                "0.7.0",
+                &database,
+                &root.path().join("backup")
+            )
+            .is_err()
+        );
+        assert_eq!(generation_bytes(&database), before);
+        assert!(!root.path().join("backup").exists());
+    }
+
+    #[test]
+    fn interrupted_sunshine_upgrade_can_commit_or_restore_exact_old_bytes() {
+        for action in [RecoveryAction::Rollback, RecoveryAction::Commit] {
+            let root = tempfile::tempdir().unwrap();
+            let database = root.path().join("sunshine.sqlite3");
+            let backup = root.path().join("backup");
+            create_sunshine_fixture(&database);
+            let before = generation_bytes(&database);
+            let result = upgrade_sqlite_with_hook(
+                Product::SunshineManager,
+                "0.6.0",
+                "0.7.0",
+                &database,
+                &backup,
+                |point| {
+                    if matches!(point, RestorePoint::Installed) {
+                        anyhow::bail!("injected interruption")
+                    }
+                    Ok(())
+                },
+            );
+            assert!(result.is_err());
+            let recovery = fs::read_dir(root.path())
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .find(|path| {
+                    path.file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .contains(".restore-")
+                })
+                .unwrap();
+            recover_sqlite_restore(&recovery, action).unwrap();
+            if action == RecoveryAction::Rollback {
+                assert_eq!(generation_bytes(&database), before);
+                verify_source_database(&database, sunshine_0_6_to_0_7::ADAPTER).unwrap();
+            } else {
+                let identity =
+                    verify_current_database(&database, Product::SunshineManager).unwrap();
                 assert_eq!(identity.application_version, "0.7.0");
             }
         }

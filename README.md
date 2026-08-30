@@ -46,6 +46,10 @@ isarmg-upgrade upgrade-sqlite --product host-monitoring \\
 isarmg-upgrade verify-source-backup --product host-monitoring \\
   --from-version 0.6.0 --to-version 0.7.0 \\
   --input /srv/backup/host-monitoring-0.6.0-before-upgrade
+isarmg-upgrade upgrade-sqlite --product sunshine-manager \\
+  --from-version 0.6.0 --to-version 0.7.0 \\
+  --database /var/lib/isarmg/sunshine-manager/app.sqlite3 \\
+  --backup-output /srv/backup/sunshine-manager-0.6.0-before-upgrade
 ```
 
 Replacing an existing database is never implicit. Restore stages and verifies
@@ -58,12 +62,12 @@ isarmg-upgrade recover-sqlite --recovery /path/from/error --action commit
 isarmg-upgrade recover-sqlite --recovery /path/from/error --action rollback
 ```
 
-The registered version adapter currently supports exactly Host Monitoring
-`0.6.0 -> 0.7.0`. It validates the five-row SQLx ledger and its SHA-384
-checksums, clones the source generation without opening it, publishes a verified
-old-generation backup, creates the consolidated `0.7.0` schema in a
-same-filesystem staging directory, and copies every table through explicit
-column lists. It does not run `ALTER TABLE` against the source.
+The registered adapters support exactly Host Monitoring `0.6.0 -> 0.7.0` and
+Sunshine Manager `0.6.0 -> 0.7.0`. They validate their respective five-row and
+four-row SQLx ledgers and SHA-384 checksums, clone the source generation without
+opening it, publish a verified old-generation backup, create the consolidated
+`0.7.0` schema in a same-filesystem staging directory, and copy every table
+through explicit column lists. They do not run `ALTER TABLE` against the source.
 
 The generic SQLite-only backup command supports Host Monitoring and Sunshine
 Manager current databases. Composite Photo, Sentinel, and Dufs commands are
