@@ -23,12 +23,15 @@ application version or schema identity without modifying it.
   An adapter may define a protected configuration as a sensitive backup
   resource; its manifest still contains only hashes and aggregate metadata.
 
-The catalog includes all six repositories. `isarmg-foundation` is a library and
-therefore has source/API upgrade adapters but no runtime backup resources.
+The catalog includes all six repositories. `isarmg-foundation` is a library,
+has no runtime state, and deliberately has no state or historical API adapter.
+`support --json` is the only capability authority; catalog membership never
+implies that a backup or upgrade command exists.
 
 ## Commands
 
 ```console
+isarmg-upgrade support --json
 isarmg-upgrade catalog --json
 isarmg-upgrade inspect-manifest /path/to/backup/manifest.json
 isarmg-upgrade backup-sqlite --product host-monitoring \\
@@ -85,6 +88,38 @@ the incoming database, preserves the old database plus SQLite sidecars in a
 durable adjacent journal, and only then installs it. If a process is interrupted
 after mutation, the error prints the recovery directory; resolve it explicitly:
 
+Current composite state uses dedicated commands and is never routed through a
+historical upgrade edge:
+
+```console
+isarmg-upgrade backup-photo --database /var/lib/isarmg/photo-backup/app.sqlite3 \
+  --data-dir /var/lib/isarmg/photo-backup/data \
+  --output /srv/backup/photo-0.2.0
+isarmg-upgrade verify-photo-backup --input /srv/backup/photo-0.2.0
+
+isarmg-upgrade backup-sentinel-current \
+  --database /var/lib/isarmg/sentinel-monitor/app.sqlite3 \
+  --runtime-directory /run/isarmg/sentinel-monitor \
+  --mediamtx-config /etc/isarmg/sentinel-monitor/mediamtx.yml \
+  --mediamtx-contract /var/lib/isarmg/sentinel-monitor/mediamtx.lock \
+  --recordings-directory /var/lib/isarmg/sentinel-monitor/recordings \
+  --credentials-key-id sentinel-credentials-0.2.0-key-1 \
+  --credentials-key-file /run/credentials/sentinel.key \
+  --output /srv/backup/sentinel-0.2.0
+
+isarmg-upgrade backup-dufs-current \
+  --database /var/lib/dufs/state.sqlite3 --state-dir /var/lib/dufs \
+  --shared-root /srv/dufs --config /etc/dufs/dufs.yml \
+  --service-uid 991 --service-gid 991 --output /srv/backup/dufs-0.50.0 \
+  --max-tree-entries 1000000 --max-tree-logical-bytes 1099511627776 \
+  --max-tree-backup-bytes 1099511627776 --max-entries-per-directory 100000
+```
+
+Sunshine current backup, verification, and restore require both
+`--credentials-key-id` and `--credentials-key-file`. The tool authenticates
+every stored host secret and unfinished encrypted operation request before it
+publishes a backup or installs a restore. Raw key bytes never enter the backup.
+
 ```console
 isarmg-upgrade recover-sqlite --product host-monitoring \\
   --expect-version 0.7.0 --recovery /path/from/error --action commit
@@ -107,7 +142,7 @@ database, exact MediaMTX config and companion contract, and every recording
 file and empty directory with a checksummed inventory. The target is pinned to
 Sentinel commit `e51a4a90933547c1f95b625635a4430e4632acb9`, revision `1`, and
 schema SHA-256
-`73a26cfd0d8d55f1559407904fe6445e278310614750cc1c0f3306a2803b7df6`.
+`b089342e00e672d6e6c679e15f331c90e599129371042a37948a4b53e5f8e49e`.
 It creates that schema from scratch, resets the transient global reconciler
 lease to the target's canonical free state, and converts all present main URL,
 sub URL, username, and password values directly from the 0.1 raw AES-GCM form
@@ -187,13 +222,22 @@ isarmg-upgrade recover-dufs-upgrade --product dufs-ram \\
 The generic SQLite-only commands have a code-owned allowlist containing only
 Host Monitoring `0.7.0`, revision `1`, schema SHA-256
 `2f63778e94b345d100c10f8b45b98f06e39590547f6b1d65f9b5b0e7f6989328`, and
-Sunshine Manager `0.7.0`, revision `1`, schema SHA-256
-`1e55653f9b9b4805873164e52b79d399aec4fe327a8648218d4cbcb16b561b98`.
+Sunshine Manager `0.7.0`, revision `1`, and its exact code-owned current schema
+SHA-256.
 Database metadata, the actual schema, backup manifest, explicit product, and
 restore/recovery journal must all agree with that allowlist. A different but
-self-consistent identity is rejected. Sentinel and Dufs have only their exact
-composite commands above; Photo commands are added only together with a tested
-product adapter.
+self-consistent identity is rejected. Sentinel, Dufs, and Photo use only their
+dedicated current composite adapters above.
+
+## Formal release
+
+Tag `v0.2.0` drives a two-job release workflow. The read-only build job runs the
+complete quality gate and stages the binary, machine-readable capability
+catalog, release metadata, CycloneDX SBOM, build environment, and provenance.
+The publish job does not check out source; it derives the public Ed25519 key,
+signs `SHA256SUMS`, verifies the signature and every checksum after unpacking,
+and publishes the exact `.tar.zst` plus its outer digest. Operators must verify
+the embedded signature with `RELEASE-SIGNING-PUBLIC.pem` before execution.
 
 ## Development
 

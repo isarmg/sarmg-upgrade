@@ -17,6 +17,9 @@ MAX_WORKFLOW_BYTES = 1024 * 1024
 PINNED_OFFICIAL_ACTIONS = {
     # actions/checkout v4.2.2, verified against the official Git tag.
     "actions/checkout": "11bd71901bbe5b1630ceea73d27597364c9af683",
+    # actions/upload-artifact v4.6.2 and download-artifact v4.3.0.
+    "actions/upload-artifact": "ea165f8d65b6e75b540449e92b4886f43607fa02",
+    "actions/download-artifact": "d3f86a106a0bac45b974a628896c90dbdf5c8093",
 }
 
 
@@ -173,11 +176,20 @@ def validate_job(source: str, header: Line, segment: list[Line]) -> None:
         len(segment),
     )
     entries = segment[permission_index + 1 : permission_end]
-    if len(entries) != 1 or entries[0].indent != 6 or entries[0].content != "contents: read":
+    expected_permission = (
+        "contents: write"
+        if source == ".github/workflows/release.yml" and header.content == "publish:"
+        else "contents: read"
+    )
+    if (
+        len(entries) != 1
+        or entries[0].indent != 6
+        or entries[0].content != expected_permission
+    ):
         raise fail(
             source,
             entries[0] if entries else permissions[0],
-            "job permissions must contain only contents: read",
+            f"job permissions must contain only {expected_permission}",
         )
 
 

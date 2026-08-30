@@ -18,7 +18,10 @@ stopped.
 
 Generic SQLite backup, verification, restore, and recovery accept only the
 code-owned official current identity for the explicitly selected Host Monitoring
-or Sunshine Manager product. A database or journal is rejected even when its
+or Sunshine Manager product. Sunshine additionally requires the exact external
+credential key ID and private key file for backup, verification, and restore;
+all encrypted hosts and unfinished operations are authenticated before state is
+accepted. A database or journal is rejected even when its
 self-reported version, revision, schema hash, manifest, and actual schema are
 mutually consistent but absent from that allowlist. Composite products cannot
 use the generic recovery entry point.
