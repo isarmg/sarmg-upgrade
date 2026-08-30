@@ -1,0 +1,24 @@
+[package]
+name = "isarmg-upgrade"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+authors = ["sarmg <isarmg@163.com>"]
+license = "Apache-2.0"
+description = "Offline upgrade, backup, verification, and restore tooling for iSarmg products"
+publish = false
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "symbols"
