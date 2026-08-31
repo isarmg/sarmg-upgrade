@@ -54,7 +54,6 @@ if [[ ! -f $private_key ]]; then
   exit 1
 fi
 umask 077
-mkdir "$output"
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT
 derived_public_key=$temporary/derived-release-signing-public.pem
@@ -72,6 +71,7 @@ if [[ $actual_public_key_sha != "$expected_public_key_sha" ]]; then
   echo "release signing public key does not match release metadata" >&2
   exit 1
 fi
+mkdir "$output"
 (
   cd "$package"
   find . -type f ! -name SHA256SUMS ! -name SHA256SUMS.sig -print0 \
