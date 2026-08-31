@@ -7,7 +7,15 @@ if [[ $# -ne 1 ]]; then
 fi
 
 output=$1
-version=0.2.0
+version=$(python3 - <<'PY'
+import pathlib, tomllib
+
+package = tomllib.loads(pathlib.Path("Cargo.toml").read_text(encoding="utf-8"))["package"]
+if package["name"] != "sarmg-upgrade":
+    raise SystemExit("Cargo.toml does not describe sarmg-upgrade")
+print(package["version"])
+PY
+)
 target=x86_64-unknown-linux-gnu
 revision=$(git rev-parse HEAD)
 if [[ -n $(git status --porcelain --untracked-files=normal) ]]; then
@@ -42,8 +50,10 @@ catalog_sha=$(sha256sum "$output/package/adapter-catalog.json" | awk '{print $1}
 capabilities=$(python3 - "$output/package/adapter-catalog.json" <<'PY'
 import json, sys
 with open(sys.argv[1], encoding="utf-8") as source:
-    value = json.load(source)["supported_capabilities"]
-print(json.dumps(value, separators=(",", ":")))
+    catalog = json.load(source)
+if catalog.get("formal_release_target") != "x86_64-unknown-linux-gnu":
+    raise SystemExit("binary support catalog does not name the sole formal release target")
+print(json.dumps(catalog["supported_capabilities"], separators=(",", ":")))
 PY
 )
 cat >"$output/package/release.json" <<EOF

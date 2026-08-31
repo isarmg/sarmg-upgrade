@@ -22,6 +22,13 @@ use rustix::{
     },
     io::Errno,
 };
+#[cfg(test)]
+use sarmg_schema_identity::PRODUCT_METADATA_DDL;
+use sarmg_schema_identity::{
+    ProductMetadataColumn, ProductMetadataRow, SQLITE_SCHEMA_ROWS_QUERY, SchemaRow,
+    schema_fingerprint as canonical_schema_fingerprint, schema_identity_from_metadata_rows,
+    validate_product_metadata_columns,
+};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -40,49 +47,37 @@ const DATABASE_FILE: &str = "database.sqlite3";
 const MANIFEST_FILE: &str = "manifest.json";
 const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 const MAX_CREDENTIAL_KEY_BYTES: u64 = 4096;
-#[cfg(test)]
-pub(super) const PRODUCT_METADATA_DDL: &str = "CREATE TABLE product_metadata (\n\
-    singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton=1),\n\
-    application TEXT NOT NULL,\n\
-    application_version TEXT NOT NULL,\n\
-    schema_revision INTEGER NOT NULL,\n\
-    schema_sha256 TEXT NOT NULL\n\
-)";
-pub(super) const HOST_CURRENT_APPLICATION_VERSION: &str = "0.7.0";
+pub(crate) const HOST_CURRENT_APPLICATION_VERSION: &str = "0.7.0";
 pub(super) const HOST_CURRENT_SCHEMA_REVISION: u64 = 1;
 pub(super) const HOST_CURRENT_SCHEMA_SHA256: &str =
-    "2f63778e94b345d100c10f8b45b98f06e39590547f6b1d65f9b5b0e7f6989328";
-pub(super) const SUNSHINE_CURRENT_APPLICATION_VERSION: &str = "0.7.0";
+    "12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05";
+pub(crate) const SUNSHINE_CURRENT_APPLICATION_VERSION: &str = "0.7.0";
 pub(super) const SUNSHINE_CURRENT_SCHEMA_REVISION: u64 = 1;
 pub(super) const SUNSHINE_CURRENT_SCHEMA_SHA256: &str =
-    "a8e2fe3c3a9a59a9a36979bcef3628299832d02078e421953ab78e0c0900d5a7";
+    "a717bcd5a591e7f7cc6da5826af88ad0deab2fdc339ce4649ad84f21ea879dbc";
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) struct OfficialSqliteIdentity {
-    pub product: Product,
-    pub application_version: &'static str,
-    pub schema_revision: u64,
-    pub schema_sha256: &'static str,
-}
-
-pub(super) fn official_sqlite_identity(product: Product) -> anyhow::Result<OfficialSqliteIdentity> {
+pub(super) fn official_sqlite_identity(product: Product) -> anyhow::Result<SchemaIdentity> {
     require_sqlite_only_product(product)?;
-    let identity = match product {
-        Product::HostMonitoring => OfficialSqliteIdentity {
-            product,
-            application_version: HOST_CURRENT_APPLICATION_VERSION,
-            schema_revision: HOST_CURRENT_SCHEMA_REVISION,
-            schema_sha256: HOST_CURRENT_SCHEMA_SHA256,
-        },
-        Product::SunshineManager => OfficialSqliteIdentity {
-            product,
-            application_version: SUNSHINE_CURRENT_APPLICATION_VERSION,
-            schema_revision: SUNSHINE_CURRENT_SCHEMA_REVISION,
-            schema_sha256: SUNSHINE_CURRENT_SCHEMA_SHA256,
-        },
+    let (application_version, schema_revision, schema_sha256) = match product {
+        Product::HostMonitoring => (
+            HOST_CURRENT_APPLICATION_VERSION,
+            HOST_CURRENT_SCHEMA_REVISION,
+            HOST_CURRENT_SCHEMA_SHA256,
+        ),
+        Product::SunshineManager => (
+            SUNSHINE_CURRENT_APPLICATION_VERSION,
+            SUNSHINE_CURRENT_SCHEMA_REVISION,
+            SUNSHINE_CURRENT_SCHEMA_SHA256,
+        ),
         _ => anyhow::bail!("no official generic current SQLite identity for {product}"),
     };
-    Ok(identity)
+    SchemaIdentity::new(
+        product.slug(),
+        application_version,
+        schema_revision,
+        schema_sha256,
+    )
+    .context("compiled official SQLite identity is invalid")
 }
 
 pub(super) fn verify_official_sqlite_identity(
@@ -90,13 +85,9 @@ pub(super) fn verify_official_sqlite_identity(
     identity: &SchemaIdentity,
 ) -> anyhow::Result<()> {
     let official = official_sqlite_identity(product)?;
-    ensure!(
-        identity.application == official.product.slug()
-            && identity.application_version == official.application_version
-            && identity.schema_revision == official.schema_revision
-            && identity.schema_sha256 == official.schema_sha256,
-        "SQLite identity is not the exact official current contract for {product}"
-    );
+    identity.require_exact(&official).with_context(|| {
+        format!("SQLite identity is not the exact official current contract for {product}")
+    })?;
     Ok(())
 }
 
@@ -108,8 +99,9 @@ pub struct VerifiedSqliteBackup {
 
 /// Create one immutable, checksummed SQLite backup set.
 ///
-/// This generic path intentionally accepts only the exact current metadata
-/// contract. Databases from older versions require an explicit product adapter.
+/// This generic path intentionally accepts only the exact compiled current
+/// identity. Every other database generation is rejected; adapter selection is
+/// never inferred from database contents.
 pub fn create_sqlite_backup(
     product: Product,
     database: &Path,
@@ -167,10 +159,10 @@ fn create_sqlite_backup_internal(
     }
 
     let (bytes, sha256) = hash_regular_file(&database_output)?;
-    let manifest = BackupManifest {
+    let manifest = BackupManifest::new(sarmg_contracts::BackupManifest {
         manifest_version: MANIFEST_VERSION,
         tool_version: env!("CARGO_PKG_VERSION").to_owned(),
-        product,
+        product: product.slug().to_owned(),
         application_version: snapshot_identity.application_version.clone(),
         schema_identity: Some(snapshot_identity),
         created_at_epoch_seconds: SystemTime::now()
@@ -184,13 +176,12 @@ fn create_sqlite_backup_internal(
         resources: vec![ResourceEntry {
             name: "database".to_owned(),
             kind: ResourceKind::Sqlite,
-            path: DATABASE_FILE.into(),
+            path: DATABASE_FILE.to_owned(),
             bytes,
             files: 1,
             sha256,
         }],
-    };
-    manifest.validate()?;
+    })?;
     write_manifest(&pending_path.join(MANIFEST_FILE), &manifest)?;
     sync_directory(&pending_path)?;
     pending.commit()?;
@@ -245,7 +236,7 @@ fn verify_sqlite_backup_internal(
     let manifest_bytes = directory.read_bounded(MANIFEST_FILE, MAX_MANIFEST_BYTES)?;
     let manifest = BackupManifest::from_slice(&manifest_bytes)?;
     ensure!(
-        manifest.product == product,
+        manifest.product == product.slug(),
         "SQLite backup product does not match the explicit product"
     );
     match credentials {
@@ -270,7 +261,7 @@ fn verify_sqlite_backup_internal(
     ensure!(
         resource.name == "database"
             && resource.kind == ResourceKind::Sqlite
-            && resource.path == Path::new(DATABASE_FILE)
+            && resource.path == DATABASE_FILE
             && resource.files == 1,
         "SQLite backup database resource contract is invalid"
     );
@@ -329,7 +320,7 @@ fn validate_key_id(value: &str) -> anyhow::Result<()> {
 /// Read a private base64-encoded 32-byte key without following a final symlink.
 ///
 /// This helper is product-neutral and remains part of the reusable backup layer;
-/// it does not recognize any historical database generation.
+/// it only decodes key material and never selects a product or database contract.
 pub fn credentials_key_from_file(path: &Path) -> anyhow::Result<[u8; 32]> {
     let named_before = fs::symlink_metadata(path).context("inspect credentials key file")?;
     ensure!(
@@ -437,6 +428,17 @@ pub fn schema_fingerprint(database: &Path) -> anyhow::Result<String> {
 }
 
 fn verify_current_database(database: &Path, product: Product) -> anyhow::Result<SchemaIdentity> {
+    let identity = verify_schema_identity_database(database)?;
+    crate::manifest::validate_schema_identity_for_product(&identity, product)?;
+    Ok(identity)
+}
+
+/// Rusqlite adapter for the Foundation schema-identity contract.
+///
+/// Foundation owns the driver-independent row model and fingerprint framing;
+/// this crate owns safe file opening, SQLite health checks and exact-current
+/// identity enforcement at the product boundary.
+pub(crate) fn verify_schema_identity_database(database: &Path) -> anyhow::Result<SchemaIdentity> {
     require_regular_file(database, "SQLite database")?;
     let connection = open_read_only(database)?;
     connection
@@ -462,127 +464,69 @@ fn verify_current_database(database: &Path, product: Product) -> anyhow::Result<
     );
 
     verify_metadata_table_shape(&connection)?;
-    let row_count: i64 =
-        connection.query_row("SELECT COUNT(*) FROM product_metadata", [], |row| {
-            row.get(0)
-        })?;
-    ensure!(
-        row_count == 1,
-        "product_metadata must contain exactly one row"
-    );
-    let (singleton, application, application_version, schema_revision, schema_sha256): (
-        i64,
-        String,
-        String,
-        i64,
-        String,
-    ) = connection.query_row(
-        "SELECT singleton, application, application_version, schema_revision, schema_sha256 \
-         FROM product_metadata",
-        [],
-        |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-            ))
-        },
-    )?;
-    ensure!(singleton == 1, "product_metadata singleton must equal 1");
-    let schema_revision = u64::try_from(schema_revision)
-        .context("product_metadata schema_revision must not be negative")?;
-    let identity = SchemaIdentity {
-        application,
-        application_version,
-        schema_revision,
-        schema_sha256,
-    };
-    identity.validate(product)?;
+    let metadata_rows = product_metadata_rows(&connection)?;
+    let identity = schema_identity_from_metadata_rows(&metadata_rows)
+        .context("validate product_metadata row")?;
 
-    let migration_table_count: i64 = connection.query_row(
-        "SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='_sqlx_migrations'",
-        [],
-        |row| row.get(0),
-    )?;
-    ensure!(
-        migration_table_count == 0,
-        "current-only databases must not contain the SQLx migration ledger"
-    );
     let actual = schema_fingerprint_connection(&connection)?;
-    ensure!(
-        actual == identity.schema_sha256,
-        "actual SQLite schema fingerprint does not match product_metadata"
-    );
+    identity
+        .verify_fingerprint(&actual)
+        .context("actual SQLite schema fingerprint does not match product_metadata")?;
     Ok(identity)
 }
 
 fn verify_metadata_table_shape(connection: &Connection) -> anyhow::Result<()> {
     let mut statement = connection.prepare(
-        "SELECT cid, name, type, \"notnull\", COALESCE(dflt_value, ''), pk \
+        "SELECT cid, name, type, \"notnull\", dflt_value, pk \
          FROM pragma_table_info('product_metadata') ORDER BY cid",
     )?;
     let columns = statement
         .query_map([], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, i64>(5)?,
-            ))
+            Ok(ProductMetadataColumn {
+                cid: row.get(0)?,
+                name: row.get(1)?,
+                declared_type: row.get(2)?,
+                not_null: row.get(3)?,
+                default_sql: row.get(4)?,
+                primary_key_position: row.get(5)?,
+            })
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    let expected = [
-        (0, "singleton", "INTEGER", 1, "", 1),
-        (1, "application", "TEXT", 1, "", 0),
-        (2, "application_version", "TEXT", 1, "", 0),
-        (3, "schema_revision", "INTEGER", 1, "", 0),
-        (4, "schema_sha256", "TEXT", 1, "", 0),
-    ];
-    ensure!(
-        columns.len() == expected.len(),
-        "product_metadata has an unexpected shape"
-    );
-    for (actual, expected) in columns.iter().zip(expected) {
-        ensure!(
-            actual.0 == expected.0
-                && actual.1 == expected.1
-                && actual.2.eq_ignore_ascii_case(expected.2)
-                && actual.3 == expected.3
-                && actual.4 == expected.4
-                && actual.5 == expected.5,
-            "product_metadata has an unexpected column definition"
-        );
-    }
+    validate_product_metadata_columns(&columns)
+        .context("product_metadata has an unexpected shape")?;
     Ok(())
 }
 
-fn schema_fingerprint_connection(connection: &Connection) -> anyhow::Result<String> {
+fn product_metadata_rows(connection: &Connection) -> anyhow::Result<Vec<ProductMetadataRow>> {
     let mut statement = connection.prepare(
-        "SELECT type, name, tbl_name, COALESCE(sql, '') FROM sqlite_schema \
-         WHERE name NOT GLOB 'sqlite_*' AND name <> 'product_metadata' \
-         ORDER BY type, name, tbl_name",
+        "SELECT singleton, application, application_version, schema_revision, schema_sha256 \
+         FROM product_metadata ORDER BY singleton",
     )?;
+    Ok(statement
+        .query_map([], |row| {
+            Ok(ProductMetadataRow {
+                singleton: row.get(0)?,
+                application: row.get(1)?,
+                application_version: row.get(2)?,
+                schema_revision: row.get(3)?,
+                schema_sha256: row.get(4)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?)
+}
+
+fn schema_fingerprint_connection(connection: &Connection) -> anyhow::Result<String> {
+    let mut statement = connection.prepare(SQLITE_SCHEMA_ROWS_QUERY)?;
     let rows = statement.query_map([], |row| {
-        Ok([
+        Ok(SchemaRow::new(
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
             row.get::<_, String>(2)?,
             row.get::<_, String>(3)?,
-        ])
+        ))
     })?;
-    let mut digest = Sha256::new();
-    for row in rows {
-        for field in row? {
-            let bytes = field.as_bytes();
-            digest.update((bytes.len() as u64).to_be_bytes());
-            digest.update(bytes);
-        }
-    }
-    Ok(lower_hex(&digest.finalize()))
+    let rows = rows.collect::<Result<Vec<_>, _>>()?;
+    canonical_schema_fingerprint(&rows).context("calculate canonical SQLite schema fingerprint")
 }
 
 fn copy_database_online(source: &Path, destination: &Path) -> anyhow::Result<()> {
@@ -932,15 +876,19 @@ impl SecureDirectory {
     }
 }
 
-struct PendingDirectory {
+/// Private sibling directory published with one atomic, no-clobber rename.
+///
+/// Composite adapters reuse this exact primitive so every backup path has the
+/// same final-publication and failed-stage cleanup semantics.
+pub(crate) struct PendingDirectory {
     parent: SecureDirectory,
     pending_name: OsString,
     output_name: OsString,
-    committed: bool,
+    published: bool,
 }
 
 impl PendingDirectory {
-    fn create(output: &Path) -> anyhow::Result<Self> {
+    pub(crate) fn create(output: &Path) -> anyhow::Result<Self> {
         let output = absolute_path(output)?;
         let parent_path = output
             .parent()
@@ -961,20 +909,23 @@ impl PendingDirectory {
         pending_name.push(format!(".pending-{}", Uuid::new_v4()));
         mkdirat(&parent.file, &pending_name, Mode::from_raw_mode(0o700))
             .context("create pending backup directory")?;
-        parent.file.sync_all()?;
-        Ok(Self {
+        let pending = Self {
             parent,
             pending_name,
             output_name,
-            committed: false,
-        })
+            published: false,
+        };
+        // Construct the guard before this durability boundary so a sync error
+        // also removes the directory that was just created.
+        pending.parent.file.sync_all()?;
+        Ok(pending)
     }
 
-    fn path(&self) -> PathBuf {
+    pub(crate) fn path(&self) -> PathBuf {
         self.parent.child_path(&self.pending_name)
     }
 
-    fn commit(&mut self) -> anyhow::Result<()> {
+    pub(crate) fn commit(&mut self) -> anyhow::Result<()> {
         renameat_with(
             &self.parent.file,
             &self.pending_name,
@@ -983,15 +934,17 @@ impl PendingDirectory {
             RenameFlags::NOREPLACE,
         )
         .context("publish completed backup without overwriting")?;
+        // Once renameat2 succeeds, the final name is visible and must never be
+        // treated as an unpublished stage, even if the following fsync fails.
+        self.published = true;
         self.parent.file.sync_all()?;
-        self.committed = true;
         Ok(())
     }
 }
 
 impl Drop for PendingDirectory {
     fn drop(&mut self) {
-        if !self.committed {
+        if !self.published {
             let _ = fs::remove_dir_all(self.path());
             let _ = self.parent.file.sync_all();
         }
@@ -1121,7 +1074,7 @@ mod tests {
         let database = root.path().join("current.sqlite3");
         let output = root.path().join("backup");
         let official = official_sqlite_identity(product).unwrap();
-        create_current_database(&database, product, official.application_version);
+        create_current_database(&database, product, &official.application_version);
 
         let created = create_sqlite_backup(product, &database, &output).unwrap();
         let identity = created.manifest.schema_identity.as_ref().unwrap();
@@ -1214,12 +1167,12 @@ mod tests {
     }
 
     #[test]
-    fn refuses_legacy_database_without_modifying_output() {
+    fn refuses_an_unknown_database_without_modifying_output() {
         let root = tempfile::tempdir().unwrap();
-        let database = root.path().join("legacy.sqlite3");
+        let database = root.path().join("unknown.sqlite3");
         Connection::open(&database)
             .unwrap()
-            .execute_batch("CREATE TABLE legacy (id INTEGER PRIMARY KEY);")
+            .execute_batch("CREATE TABLE unknown_state (id INTEGER PRIMARY KEY);")
             .unwrap();
         let output = root.path().join("backup");
         assert!(create_sqlite_backup(Product::HostMonitoring, &database, &output).is_err());
@@ -1236,6 +1189,48 @@ mod tests {
         fs::write(output.join("keep"), b"unchanged").unwrap();
         assert!(create_sqlite_backup(Product::SunshineManager, &database, &output).is_err());
         assert_eq!(fs::read(output.join("keep")).unwrap(), b"unchanged");
+        assert!(
+            fs::read_dir(root.path()).unwrap().all(|entry| {
+                !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".backup.pending-")
+            }),
+            "an output that exists before staging must not leave a pending directory",
+        );
+    }
+
+    #[test]
+    fn publication_race_never_replaces_target_and_drop_removes_only_pending() {
+        let root = tempfile::tempdir().unwrap();
+        let output = root.path().join("backup");
+        let mut pending = PendingDirectory::create(&output).unwrap();
+        let pending_path = pending.path();
+        fs::write(pending_path.join("staged"), b"unpublished").unwrap();
+
+        // Simulate a competing publisher winning after the absence check but
+        // before commit.  RENAME_NOREPLACE must reject this atomically.
+        fs::create_dir(&output).unwrap();
+        fs::write(output.join("keep"), b"winner").unwrap();
+        assert!(pending.commit().is_err());
+        assert_eq!(fs::read(output.join("keep")).unwrap(), b"winner");
+        assert!(
+            pending_path.exists(),
+            "failed commit remains owned by the guard"
+        );
+
+        drop(pending);
+        assert!(
+            !pending_path.exists(),
+            "dropping a failed guard removes its stage"
+        );
+        assert_eq!(fs::read(output.join("keep")).unwrap(), b"winner");
+        assert_eq!(
+            fs::read_dir(root.path()).unwrap().count(),
+            1,
+            "cleanup must preserve the competing output and remove only its own stage",
+        );
     }
 
     #[test]

@@ -862,7 +862,7 @@ impl RestoreJournal {
                     .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_')),
             "restore journal tool version is invalid"
         );
-        self.schema_identity.validate(self.product)?;
+        crate::manifest::validate_schema_identity_for_product(&self.schema_identity, self.product)?;
         ensure!(
             self.application_version == self.schema_identity.application_version,
             "restore journal application version is inconsistent"
@@ -1182,13 +1182,13 @@ mod tests {
         let backup = root.path().join("backup");
         let destination = root.path().join("restored.sqlite3");
         let official = official_sqlite_identity(product).unwrap();
-        create_current_database(&source, product, official.application_version);
+        create_current_database(&source, product, &official.application_version);
         insert_test_record(&source, product, "saved");
         create_sqlite_backup(product, &source, &backup).unwrap();
 
         restore_sqlite_backup(
             product,
-            official.application_version,
+            &official.application_version,
             &backup,
             &destination,
             RestoreExisting::Refuse,
@@ -1266,7 +1266,7 @@ mod tests {
             insert_test_record(&destination, Product::HostMonitoring, "old-two");
             create_sqlite_backup(Product::HostMonitoring, &source, &backup).unwrap();
             let verified = verify_sqlite_backup(Product::HostMonitoring, &backup).unwrap();
-            let identity = verified.manifest.schema_identity.unwrap();
+            let identity = verified.manifest.schema_identity.clone().unwrap();
             let maintenance =
                 MaintenanceLock::exclusive(Product::HostMonitoring, &destination).unwrap();
             let originals = inspect_original_generation(&maintenance.location).unwrap();
@@ -1458,7 +1458,7 @@ mod tests {
         insert_test_record(&destination, Product::HostMonitoring, "old");
         create_sqlite_backup(Product::HostMonitoring, &source, &backup).unwrap();
         let verified = verify_sqlite_backup(Product::HostMonitoring, &backup).unwrap();
-        let identity = verified.manifest.schema_identity.unwrap();
+        let identity = verified.manifest.schema_identity.clone().unwrap();
         let maintenance =
             MaintenanceLock::exclusive(Product::HostMonitoring, &destination).unwrap();
         let originals = inspect_original_generation(&maintenance.location).unwrap();

@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.98"
 authors = ["sarmg <isarmg@163.com>"]
 license = "Apache-2.0"
-description = "Offline upgrade, backup, verification, and restore tooling for Sarmg products"
+description = "Offline current-state backup, verification, restore, and future upgrade tooling for Sarmg products"
 publish = false
 
 [dependencies]
@@ -17,6 +17,8 @@ blake3 = "1"
 clap = { version = "4.5", features = ["derive"] }
 hkdf = "0.12"
 rand = "0.8"
+sarmg-contracts = { version = "=0.3.0", git = "https://github.com/isarmg/sarmg-foundation.git", rev = "1fe326081cfd896f05ff502e80f99504797c14c6" }
+sarmg-schema-identity = { version = "=0.3.0", git = "https://github.com/isarmg/sarmg-foundation.git", rev = "1fe326081cfd896f05ff502e80f99504797c14c6" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = { package = "serde_yaml_ng", version = "0.10" }

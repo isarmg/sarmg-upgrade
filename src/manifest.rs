@@ -1,83 +1,94 @@
 use std::{
     collections::BTreeSet,
     fs,
+    ops::{Deref, DerefMut},
     path::{Component, Path, PathBuf},
 };
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{Product, ResourceKind};
 
-pub const MANIFEST_VERSION: u32 = 2;
+use sarmg_contracts::{
+    BACKUP_MANIFEST_VERSION, BackupManifest as ContractBackupManifest, ValidationError,
+};
+pub use sarmg_contracts::{
+    BackupExternalRequirement as ExternalRequirement, BackupResource as ResourceEntry,
+    SchemaIdentity,
+};
 
-/// The manifest is written last. Its presence declares a complete backup set.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct BackupManifest {
-    pub manifest_version: u32,
-    pub tool_version: String,
-    pub product: Product,
-    pub application_version: String,
-    pub schema_identity: Option<SchemaIdentity>,
-    pub created_at_epoch_seconds: u64,
-    pub external_requirements: Vec<ExternalRequirement>,
-    pub resources: Vec<ResourceEntry>,
+pub const MANIFEST_VERSION: u8 = BACKUP_MANIFEST_VERSION;
+
+/// Foundation 定义线上的通用备份清单；本包装只叠加本工具拥有的产品策略。
+///
+/// 这样 JSON 字段、数值边界和基础类型只有一个实现，同时仍由本仓库拒绝
+/// 错产品、危险路径、重复资源和不符合当前产品要求的外部密钥声明。
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct BackupManifest(ContractBackupManifest);
+
+impl<'de> Deserialize<'de> for BackupManifest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let manifest = Self(ContractBackupManifest::deserialize(deserializer)?);
+        manifest.validate().map_err(serde::de::Error::custom)?;
+        Ok(manifest)
+    }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ExternalRequirement {
-    pub kind: String,
-    pub kid: String,
-    pub sha256: String,
-    pub algorithm: String,
-    pub envelope_version: u32,
+impl Deref for BackupManifest {
+    type Target = ContractBackupManifest;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct SchemaIdentity {
-    pub application: String,
-    pub application_version: String,
-    pub schema_revision: u64,
-    pub schema_sha256: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ResourceEntry {
-    pub name: String,
-    pub kind: ResourceKind,
-    pub path: PathBuf,
-    pub bytes: u64,
-    pub files: u64,
-    pub sha256: String,
+impl DerefMut for BackupManifest {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
 }
 
 impl BackupManifest {
+    pub fn new(contract: ContractBackupManifest) -> Result<Self, ManifestError> {
+        let manifest = Self(contract);
+        manifest.validate()?;
+        Ok(manifest)
+    }
+
+    pub fn into_contract(self) -> ContractBackupManifest {
+        self.0
+    }
+
+    pub fn product(&self) -> Result<Product, ManifestError> {
+        self.0
+            .product
+            .parse()
+            .map_err(|_| ManifestError::UnsupportedProduct(self.0.product.clone()))
+    }
+
     pub fn read(path: &Path) -> Result<Self, ManifestError> {
         let bytes = fs::read(path).map_err(|source| ManifestError::Read {
             path: path.to_path_buf(),
             source,
         })?;
-        let manifest = Self::from_slice(&bytes)?;
-        Ok(manifest)
+        Self::from_slice(&bytes)
     }
 
     pub fn from_slice(bytes: &[u8]) -> Result<Self, ManifestError> {
-        let manifest: Self = serde_json::from_slice(bytes)?;
-        manifest.validate()?;
-        Ok(manifest)
+        // 先走 Foundation 的严格 parser；本类型的 Deserialize 随后叠加产品校验。
+        Ok(serde_json::from_slice(bytes)?)
     }
 
     pub fn validate(&self) -> Result<(), ManifestError> {
-        if self.manifest_version != MANIFEST_VERSION {
-            return Err(ManifestError::UnsupportedVersion(self.manifest_version));
-        }
-        require_identifier("tool_version", &self.tool_version)?;
-        require_identifier("application_version", &self.application_version)?;
-        if self.product.contract().has_runtime_state && self.resources.is_empty() {
-            return Err(ManifestError::MissingResources(self.product));
+        self.0.validate()?;
+        let product = self.product()?;
+
+        if product.contract().has_runtime_state && self.resources.is_empty() {
+            return Err(ManifestError::MissingResources(product));
         }
         if self
             .resources
@@ -88,42 +99,35 @@ impl BackupManifest {
                 .schema_identity
                 .as_ref()
                 .ok_or(ManifestError::MissingSchemaIdentity)?;
-            identity.validate(self.product)?;
+            validate_schema_identity_for_product(identity, product)?;
+            if identity.application_version != self.application_version {
+                return Err(ManifestError::SchemaVersionMismatch {
+                    manifest: self.application_version.clone(),
+                    schema: identity.application_version.clone(),
+                });
+            }
         }
-        if self.product == Product::SunshineManager && self.application_version == "0.7.0" {
+        if product.contract().requires_external_credentials_key {
             if self.external_requirements.len() != 1
                 || self.external_requirements[0].kind != "credentials-key"
             {
-                return Err(ManifestError::MissingExternalCredentialsKey);
+                return Err(ManifestError::MissingExternalCredentialsKey(product));
             }
         } else if !self.external_requirements.is_empty() {
-            return Err(ManifestError::UnexpectedExternalRequirements(self.product));
-        }
-        for requirement in &self.external_requirements {
-            require_identifier("external requirement kind", &requirement.kind)?;
-            require_identifier("external requirement kid", &requirement.kid)?;
-            require_identifier("external requirement algorithm", &requirement.algorithm)?;
-            validate_sha256(&requirement.sha256)?;
-            if requirement.envelope_version == 0 {
-                return Err(ManifestError::InvalidEnvelopeVersion);
-            }
+            return Err(ManifestError::UnexpectedExternalRequirements(product));
         }
 
         let mut names = BTreeSet::new();
         let mut paths = BTreeSet::new();
         let mut previous_name: Option<&str> = None;
         for resource in &self.resources {
-            require_identifier("resource name", &resource.name)?;
-            validate_relative_path(&resource.path)?;
-            validate_sha256(&resource.sha256)?;
-            if resource.files == 0 {
-                return Err(ManifestError::EmptyResource(resource.name.clone()));
-            }
+            let path = Path::new(&resource.path);
+            validate_relative_path(path)?;
             if !names.insert(resource.name.as_str()) {
                 return Err(ManifestError::DuplicateResourceName(resource.name.clone()));
             }
-            if !paths.insert(resource.path.as_path()) {
-                return Err(ManifestError::DuplicateResourcePath(resource.path.clone()));
+            if !paths.insert(resource.path.as_str()) {
+                return Err(ManifestError::DuplicateResourcePath(path.to_path_buf()));
             }
             if previous_name.is_some_and(|previous| previous >= resource.name.as_str()) {
                 return Err(ManifestError::ResourcesNotSorted);
@@ -134,31 +138,15 @@ impl BackupManifest {
     }
 }
 
-impl SchemaIdentity {
-    pub fn validate(&self, product: Product) -> Result<(), ManifestError> {
-        require_identifier("schema application", &self.application)?;
-        require_identifier("schema application_version", &self.application_version)?;
-        validate_sha256(&self.schema_sha256)?;
-        if self.application != product.slug() {
-            return Err(ManifestError::ProductIdentityMismatch {
-                product,
-                application: self.application.clone(),
-            });
-        }
-        Ok(())
-    }
-}
-
-fn require_identifier(field: &'static str, value: &str) -> Result<(), ManifestError> {
-    if value.is_empty()
-        || value.len() > 128
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b':'))
-    {
-        return Err(ManifestError::InvalidIdentifier {
-            field,
-            value: value.to_owned(),
+pub(crate) fn validate_schema_identity_for_product(
+    identity: &SchemaIdentity,
+    product: Product,
+) -> Result<(), ManifestError> {
+    identity.validate()?;
+    if identity.application != product.slug() {
+        return Err(ManifestError::ProductIdentityMismatch {
+            product,
+            application: identity.application.clone(),
         });
     }
     Ok(())
@@ -176,17 +164,6 @@ fn validate_relative_path(path: &Path) -> Result<(), ManifestError> {
     Ok(())
 }
 
-fn validate_sha256(value: &str) -> Result<(), ManifestError> {
-    if value.len() != 64
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        return Err(ManifestError::InvalidSha256(value.to_owned()));
-    }
-    Ok(())
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum ManifestError {
     #[error("failed to read manifest {path}: {source}")]
@@ -196,31 +173,29 @@ pub enum ManifestError {
     },
     #[error("manifest JSON is invalid: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("manifest version {0} is unsupported")]
-    UnsupportedVersion(u32),
-    #[error("{field} is not a bounded ASCII identifier: {value:?}")]
-    InvalidIdentifier { field: &'static str, value: String },
+    #[error("shared backup-manifest contract is invalid: {0}")]
+    Contract(#[from] ValidationError),
+    #[error("schema identity is invalid: {0}")]
+    SchemaIdentity(#[from] sarmg_contracts::SchemaIdentityError),
+    #[error("manifest names an unsupported product: {0:?}")]
+    UnsupportedProduct(String),
     #[error("backup manifest for {0} contains no resources")]
     MissingResources(Product),
     #[error("a SQLite backup manifest must include schema_identity")]
     MissingSchemaIdentity,
-    #[error("Sunshine backup manifest lacks its exact external credentials-key requirement")]
-    MissingExternalCredentialsKey,
+    #[error("backup manifest for {0} lacks its exact external credentials-key requirement")]
+    MissingExternalCredentialsKey(Product),
     #[error("backup manifest for {0} unexpectedly declares external requirements")]
     UnexpectedExternalRequirements(Product),
-    #[error("external requirement envelope version must be non-zero")]
-    InvalidEnvelopeVersion,
     #[error("manifest product {product} does not match schema application {application:?}")]
     ProductIdentityMismatch {
         product: Product,
         application: String,
     },
+    #[error("manifest application version {manifest:?} does not match schema version {schema:?}")]
+    SchemaVersionMismatch { manifest: String, schema: String },
     #[error("resource path is not a safe relative path: {0}")]
     UnsafePath(PathBuf),
-    #[error("resource SHA-256 is not canonical lowercase hexadecimal: {0:?}")]
-    InvalidSha256(String),
-    #[error("resource {0:?} contains no files")]
-    EmptyResource(String),
     #[error("resource name is duplicated: {0:?}")]
     DuplicateResourceName(String),
     #[error("resource path is duplicated: {0}")]
@@ -234,17 +209,14 @@ mod tests {
     use super::*;
 
     fn valid_manifest() -> BackupManifest {
-        BackupManifest {
+        BackupManifest::new(ContractBackupManifest {
             manifest_version: MANIFEST_VERSION,
-            tool_version: "0.1.0".into(),
-            product: Product::HostMonitoring,
+            tool_version: "0.2.0".into(),
+            product: Product::HostMonitoring.slug().into(),
             application_version: "0.7.0".into(),
-            schema_identity: Some(SchemaIdentity {
-                application: "host-monitoring".into(),
-                application_version: "0.7.0".into(),
-                schema_revision: 1,
-                schema_sha256: "b".repeat(64),
-            }),
+            schema_identity: Some(
+                SchemaIdentity::new("host-monitoring", "0.7.0", 1, "b".repeat(64)).unwrap(),
+            ),
             created_at_epoch_seconds: 1,
             external_requirements: Vec::new(),
             resources: vec![ResourceEntry {
@@ -255,7 +227,8 @@ mod tests {
                 files: 1,
                 sha256: "a".repeat(64),
             }],
-        }
+        })
+        .unwrap()
     }
 
     #[test]
@@ -290,6 +263,44 @@ mod tests {
         assert!(matches!(
             manifest.validate(),
             Err(ManifestError::ResourcesNotSorted)
+        ));
+    }
+
+    #[test]
+    fn rejects_schema_and_manifest_version_disagreement() {
+        let mut manifest = valid_manifest();
+        manifest.application_version = "0.7.1".into();
+        assert!(matches!(
+            manifest.validate(),
+            Err(ManifestError::SchemaVersionMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_an_unknown_product_during_deserialization() {
+        let mut value = serde_json::to_value(valid_manifest()).unwrap();
+        value["product"] = serde_json::json!("unknown-product");
+        assert!(serde_json::from_value::<BackupManifest>(value).is_err());
+    }
+
+    #[test]
+    fn retains_shared_numeric_boundaries_after_product_wrapping() {
+        let mut manifest = valid_manifest();
+        manifest.resources[0].files = 0;
+        assert!(matches!(
+            manifest.validate(),
+            Err(ManifestError::Contract(
+                ValidationError::NonPositiveInteger { .. }
+            ))
+        ));
+
+        let mut manifest = valid_manifest();
+        manifest.created_at_epoch_seconds = sarmg_contracts::MAX_SAFE_JSON_INTEGER + 1;
+        assert!(matches!(
+            manifest.validate(),
+            Err(ManifestError::Contract(
+                ValidationError::UnsafeInteger { .. }
+            ))
         ));
     }
 }

@@ -6,6 +6,11 @@ import pathlib
 import sys
 import tomllib
 
+manifest = tomllib.loads(pathlib.Path("Cargo.toml").read_text(encoding="utf-8"))
+application = manifest["package"]
+if application["name"] != "sarmg-upgrade":
+    raise SystemExit("Cargo.toml does not describe sarmg-upgrade")
+
 lock = tomllib.loads(pathlib.Path("Cargo.lock").read_text(encoding="utf-8"))
 components = []
 for package in sorted(lock.get("package", []), key=lambda value: (value["name"], value["version"])):
@@ -24,7 +29,13 @@ document = {
     "bomFormat": "CycloneDX",
     "specVersion": "1.5",
     "version": 1,
-    "metadata": {"component": {"type": "application", "name": "sarmg-upgrade", "version": "0.2.0"}},
+    "metadata": {
+        "component": {
+            "type": "application",
+            "name": application["name"],
+            "version": application["version"],
+        }
+    },
     "components": components,
 }
 pathlib.Path(sys.argv[1]).write_text(

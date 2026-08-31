@@ -87,3 +87,79 @@ envelope version/Hash 要求。备份验证和恢复时重新提供受保护 key
 不要在服务运行时做排他恢复，不用 root 对用户可替换路径运行，不跟随 symlink，不覆盖已有 backup，
 不编辑 manifest 绕过 Hash，不把 Secret 放到命令日志，不对未知版本手工迁移，不删除 recovery 目录后
 重试，也不把通用 SQLite command 用于组合产品。
+
+## 11. 学习前先固定的 current 事实
+
+| 产品 | 当前 adapter | current identity | recover 边界 |
+|---|---|---|---|
+| Media Backup | SQLite + data tree 组合 adapter | `0.2.0` / r1 / `2563e6afc3fff272d02b7a5615272cc773862243bfd15aec51655abf1d9c6b1c` | 支持显式 commit/rollback |
+| Host Monitoring | SQLite-only adapter | `0.7.0` / r1 / `12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05` | 支持显式 commit/rollback |
+| Sunshine Manager | keyed SQLite-only adapter | `0.7.0` / r1 / `a717bcd5a591e7f7cc6da5826af88ad0deab2fdc339ce4649ad84f21ea879dbc` | restore 可执行，但 recover 未对外支持 |
+| Sentinel Monitor | 未实现 | 不适用 | 无命令 |
+| Dufs RAM | 未实现 | 不适用 | 无命令 |
+| Sarmg Foundation | 无运行时状态 | 不适用 | 不适用 |
+
+这些 SHA 是当前代码拥有的 allowlist，不是“同产品大致兼容”的版本提示。即使 manifest、metadata 与真实
+数据库三者自洽，只要与 binary 内置值不同，current adapter 就必须拒绝。DDL 增删一个 index、trigger、
+CHECK 或列定义也会改变 fingerprint；工具不会查看一个旧表名后进入兼容分支。
+
+Media composite manifest 另有唯一 current wire version 3，不读取 v2。其 backup 根 exact 只有
+`database.sqlite3`、`tree/`、`manifest.json`；tree inventory 将 root mode、非根目录 path/mode、文件
+path/mode/size/SHA 纳入聚合摘要。root chmod、顶层 extra entry、hardlink、symlink 或 special file 都必须被
+`verify-media-backup` 拒绝。
+
+## 12. 三条信息源的优先级
+
+```text
+正在执行的 binary：support --json
+  > 当前 checkout 的 CLI/help/代码
+  > 本文和人工表格
+  > catalog 资源描述
+  > 文件名、目录名、manifest 自报值或操作者猜测
+```
+
+- `support` 说明 binary 真正编译进了哪些 current operation/version，并列出空的 `upgrade_edges`。
+- `catalog` 说明一个产品完整状态理论上包含哪些资源。例如 Dufs 有 SQLite、data tree、configuration；
+  这恰恰说明只备份 SQLite 不完整，而不是说明 generic SQLite adapter 可用。
+- `inspect-manifest` 只证明 Foundation SQLite manifest 可严格解析，不证明文件 SHA、Schema、key 或可恢复性。
+- `verify-*` 才读取并复核全部已实现资源；产品自身 offline doctor 和启动 smoke 又是工具验证之后的下一层。
+
+## 13. 一次安全学习循环
+
+1. 在 Linux AMD64 GNU 隔离虚拟机或可丢弃目录中工作，不以生产数据开始。
+2. 记录 `sarmg-upgrade --version`、binary SHA、`support --json` 和 `catalog --json`。
+3. 由对应 current 产品生成最小真实 fixture；不要自己手写一个“看起来像”的数据库。
+4. 选择全新、同一文件系统的 output，执行 backup，并立即执行匹配的 verify。
+5. 复制备份到另一隔离位置，做单字节篡改、extra file、错误 mode、错误 key 等拒绝实验。
+6. 对全新目标执行 restore，再用产品 current offline doctor 验证，并在安全环境运行启动 smoke。
+7. 只在产品明确支持 recover 时，使用故障注入留下 recovery，分别演练 commit 与 rollback。
+8. 检查原件、来件、备份和 recovery 的每个身份是否仍可解释，最后才清理实验目录。
+
+学习目标不是背命令，而是能回答：第一次 mutation 在哪一步、此时哪些事实已经 `fsync`、掉电后谁能证明
+原代和来件、哪个命令被 support 授权、哪个动作必须停下来交给人工决策。
+
+## 14. 阅读每章的方法
+
+每章建议完成四件事：先读“边界”，再沿代码锚点找实现，然后画出失败时磁盘状态，最后写一个负例。
+如果只能解释成功路径，尚未掌握备份/恢复代码。推荐在笔记中固定以下模板：
+
+| 问题 | 必须记录的事实 |
+|---|---|
+| 输入是谁 | product、exact version、路径、文件 dev/ino/mode/nlink、key ID |
+| 读取什么 | source、snapshot、manifest、tree inventory、SQLite sidecar |
+| 第一次写哪里 | 私有 pending/stage，而不是正式 output/target |
+| 第一次改变目标 | journal 已持久化之后的 original preserve |
+| 成功证据 | published backup full verify 或 installed target current verify |
+| 中断证据 | recovery path、journal phase、incoming/original hash 与位置 |
+| 明确不证明 | service 已停、业务 smoke、未来版本兼容、历史迁移可用 |
+
+## 15. 与其他文档的关系
+
+- [工作流程与流程树](../project-workflow.md)用于逐阶段跟踪命令到代码和磁盘事实；
+- [完整功能与取舍清单](../feature-inventory-and-tradeoffs.md)用于评审功能删除、复杂度和项目边界；
+- [运维文档](../operations.md)用于真实变更窗口、命令、保管、恢复和安全事件；
+- 仓库根 [README](../../README.md)用于快速确认平台、能力与目录入口。
+
+本文和各章节不会把未来准入设计写成当前功能。凡涉及历史 edge 的段落都必须同时明确：当前
+`upgrade_edges=[]`、没有 `upgrade-*` CLI、没有 source parser/转换 SQL/graph executor，Sentinel 与 Dufs
+也没有 current adapter。

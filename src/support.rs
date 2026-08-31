@@ -1,10 +1,19 @@
 use serde::Serialize;
 
-use crate::Product;
+use crate::{
+    Product,
+    current::MEDIA_CURRENT_APPLICATION_VERSION,
+    sqlite::{HOST_CURRENT_APPLICATION_VERSION, SUNSHINE_CURRENT_APPLICATION_VERSION},
+};
+
+/// 唯一发布产物平台。该工具不是常驻 Server，但正式二进制与各 Server
+/// 使用同一 Linux AMD64 交付边界。
+pub const FORMAL_RELEASE_TARGET: &str = "x86_64-unknown-linux-gnu";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct SupportMatrix {
     pub tool_version: &'static str,
+    pub formal_release_target: &'static str,
     pub supported_capabilities: Vec<String>,
     pub products: Vec<ProductSupport>,
 }
@@ -57,19 +66,19 @@ pub fn support_matrix() -> SupportMatrix {
     let products = vec![
         ProductSupport {
             product: Product::MediaBackup,
-            current_state: CurrentStateSupport::exact("0.2.0", true),
+            current_state: CurrentStateSupport::exact(MEDIA_CURRENT_APPLICATION_VERSION, true),
             upgrade_edges: Vec::new(),
             external_requirements: Vec::new(),
         },
         ProductSupport {
             product: Product::HostMonitoring,
-            current_state: CurrentStateSupport::exact("0.7.0", true),
+            current_state: CurrentStateSupport::exact(HOST_CURRENT_APPLICATION_VERSION, true),
             upgrade_edges: Vec::new(),
             external_requirements: Vec::new(),
         },
         ProductSupport {
             product: Product::SunshineManager,
-            current_state: CurrentStateSupport::exact("0.7.0", false),
+            current_state: CurrentStateSupport::exact(SUNSHINE_CURRENT_APPLICATION_VERSION, false),
             upgrade_edges: Vec::new(),
             external_requirements: vec!["credentials-key"],
         },
@@ -77,7 +86,9 @@ pub fn support_matrix() -> SupportMatrix {
             product: Product::SentinelMonitor,
             current_state: CurrentStateSupport::none(),
             upgrade_edges: Vec::new(),
-            external_requirements: vec!["credentials-key"],
+            // Product catalog data is not a support claim. Until an adapter is
+            // implemented, the support output advertises no operational input.
+            external_requirements: Vec::new(),
         },
         ProductSupport {
             product: Product::DufsRam,
@@ -116,6 +127,7 @@ pub fn support_matrix() -> SupportMatrix {
     supported_capabilities.sort();
     SupportMatrix {
         tool_version: env!("CARGO_PKG_VERSION"),
+        formal_release_target: FORMAL_RELEASE_TARGET,
         supported_capabilities,
         products,
     }
@@ -128,6 +140,7 @@ mod tests {
     #[test]
     fn every_product_appears_once_and_no_development_upgrade_edge_is_advertised() {
         let matrix = support_matrix();
+        assert_eq!(matrix.formal_release_target, FORMAL_RELEASE_TARGET);
         assert_eq!(matrix.products.len(), Product::ALL.len());
         for product in Product::ALL {
             assert_eq!(
@@ -151,6 +164,13 @@ mod tests {
                 .iter()
                 .all(|entry| entry.upgrade_edges.is_empty())
         );
+        assert!(matrix.products.iter().all(|entry| {
+            !entry.current_state.backup.is_empty()
+                || (!entry.current_state.verify.is_empty()
+                    || !entry.current_state.restore.is_empty()
+                    || !entry.current_state.recover.is_empty())
+                || entry.external_requirements.is_empty()
+        }));
         assert!(
             matrix
                 .supported_capabilities

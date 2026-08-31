@@ -122,9 +122,15 @@ CREATE INDEX audit_events_created ON audit_events(created_at DESC);
 
 CREATE TABLE auth_users (
     user_id          TEXT PRIMARY KEY,
-    email            TEXT NOT NULL UNIQUE,
-    password_hash    TEXT NOT NULL,
-    active           INTEGER NOT NULL DEFAULT 1,
+    username         TEXT NOT NULL UNIQUE CHECK (
+        length(username) BETWEEN 3 AND 64
+        AND username = lower(username)
+        AND username NOT GLOB '*[^a-z0-9._-]*'
+        AND substr(username, 1, 1) GLOB '[a-z0-9]'
+        AND substr(username, -1, 1) GLOB '[a-z0-9]'
+    ),
+    password_hash    TEXT NOT NULL CHECK (length(password_hash) > 0),
+    active           INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
     created_at       TEXT NOT NULL,
     session_version  INTEGER NOT NULL DEFAULT 1 CHECK (session_version > 0)
 );

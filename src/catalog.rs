@@ -2,6 +2,10 @@ use std::{fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 
+// 持久资源类别属于跨项目线协议；产品目录只负责组合这些共享类别，
+// 不在升级工具中维护第二份同名枚举。
+pub use sarmg_contracts::StateResourceKind as ResourceKind;
+
 /// A product whose persistent state is managed by this offline repository.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -76,8 +80,8 @@ impl Product {
                 has_runtime_state: true,
                 requires_external_credentials_key: false,
             },
-            // Foundation is a library repository. It participates in source/API
-            // upgrades, but has no service state to back up or restore.
+            // Foundation is a library repository. It has no running service
+            // state, so the current backup/restore catalog is intentionally empty.
             Self::SarmgFoundation => ProductContract {
                 product: self,
                 resources: &[],
@@ -108,16 +112,6 @@ impl FromStr for Product {
 #[derive(Debug, thiserror::Error)]
 #[error("unsupported product {0:?}")]
 pub struct ParseProductError(String);
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ResourceKind {
-    Sqlite,
-    DataTree,
-    Configuration,
-    CompanionContract,
-    Recordings,
-}
 
 #[derive(Clone, Copy, Debug)]
 pub struct ProductContract {

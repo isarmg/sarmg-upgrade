@@ -21,4 +21,4 @@ pub use sqlite::{
     recover_sqlite_restore, restore_sqlite_backup, restore_sqlite_backup_with_credentials,
     schema_fingerprint, verify_sqlite_backup, verify_sqlite_backup_with_credentials,
 };
-pub use support::{SupportMatrix, support_matrix};
+pub use support::{FORMAL_RELEASE_TARGET, SupportMatrix, support_matrix};

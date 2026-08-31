@@ -8,7 +8,30 @@ fi
 package=$1
 private_key=$2
 output=$3
-archive=sarmg-upgrade-0.2.0-linux-x86_64.tar.zst
+
+release_metadata=$package/release.json
+if [[ ! -f $release_metadata ]]; then
+  echo "staged release metadata is unavailable" >&2
+  exit 1
+fi
+readarray -t release_identity < <(python3 - "$release_metadata" <<'PY'
+import json, pathlib, sys
+
+value = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+if value.get("product") != "sarmg-upgrade":
+    raise SystemExit("release metadata names the wrong product")
+if value.get("target") != "x86_64-unknown-linux-gnu":
+    raise SystemExit("release metadata does not name the sole supported release target")
+version = value.get("version")
+if not isinstance(version, str) or not version:
+    raise SystemExit("release metadata version is invalid")
+print(version)
+print(value["target"])
+PY
+)
+version=${release_identity[0]}
+target=${release_identity[1]}
+archive="sarmg-upgrade-${version}-linux-x86_64.tar.zst"
 
 if [[ -e $output ]]; then
   echo "final release output already exists" >&2
@@ -45,3 +68,4 @@ openssl pkeyutl -verify -rawin -pubin -inkey "$temporary/RELEASE-SIGNING-PUBLIC.
 cmp "$package/adapter-catalog.json" "$temporary/adapter-catalog.json"
 "$temporary/bin/sarmg-upgrade" support --json >"$temporary/actual-support.json"
 cmp "$temporary/adapter-catalog.json" "$temporary/actual-support.json"
+test "$target" = x86_64-unknown-linux-gnu

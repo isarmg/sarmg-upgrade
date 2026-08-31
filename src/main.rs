@@ -57,6 +57,14 @@ enum Command {
     },
     RecoverMediaRestore {
         #[arg(long)]
+        expect_version: String,
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        database: PathBuf,
+        #[arg(long)]
+        data_dir: PathBuf,
+        #[arg(long)]
         recovery: PathBuf,
         #[arg(long)]
         action: CurrentRecoveryAction,
@@ -145,14 +153,25 @@ fn main() -> anyhow::Result<()> {
             credentials_key_id: None,
             credentials_key: None,
         })?),
-        Command::RecoverMediaRestore { recovery, action } => {
-            print_current(recover_current(&CurrentRecoveryOptions {
-                recovery_directory: recovery,
-                action,
-                credentials_key_id: None,
-                credentials_key: None,
-            })?)
-        }
+        Command::RecoverMediaRestore {
+            expect_version,
+            input,
+            database,
+            data_dir,
+            recovery,
+            action,
+        } => print_current(recover_current(&CurrentRecoveryOptions {
+            product: Product::MediaBackup,
+            expected_application_version: expect_version,
+            input,
+            database,
+            tree: data_dir,
+            runtime_directory: None,
+            recovery_directory: recovery,
+            action,
+            credentials_key_id: None,
+            credentials_key: None,
+        })?),
         Command::BackupSqlite {
             product,
             database,
