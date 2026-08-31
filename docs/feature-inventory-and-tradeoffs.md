@@ -117,7 +117,7 @@ React/Vite 或其他前端；仓库当前无需运行时配置或服务部署，
 | UPG-091 | 不跨文件系统 copy fallback，不覆盖已有备份 | rename/NOREPLACE paths | 保障 | 高 | copy fallback 可暴露半代；覆盖会销毁唯一证据 | EXDEV、existing destination、parent sync fault；操作者更换同盘路径后重试新输出 |
 | UPG-092 | Rust 1.98、edition 2024 与锁文件是当前构建基线 | `rust-toolchain.toml`、`Cargo.toml`、`Cargo.lock` | 开发运维 | 中 | 工具链漂移令安全 lint、依赖和制品不可复现 | exact toolchain、`--locked`、all-targets/features；不宣称其他 Rust 版本 |
 | UPG-093 | CI 分离普通质量与 source-bound release | `.github/workflows/ci.yml`、`release.yml` | 开发运维 | 高 | release 可能绕过测试或在 publish job 执行源码 | fmt/check/clippy/test/supply-chain；publish job 不 checkout；artifact provenance |
-| UPG-094 | stage/finalize release 生成 support/catalog、SBOM、provenance、checksum/signature | `scripts/stage-release.sh`、`finalize-release.sh`、`write-sbom.py` | 开发运维 | 高 | 使用者无法证明二进制来源、依赖或能力 | clean annotated tag、exact SHA、no-clobber asset、解包复验、强签名、tamper 负例 |
+| UPG-094 | stage/finalize release 生成 support/catalog、SBOM、provenance、checksum/signature，并把 Secret 私钥锁定到源码公钥 | `scripts/stage-release.sh`、`finalize-release.sh`、`write-sbom.py`、`release/sarmg-upgrade-release-signing-public.pem` | 开发运维 | 高 | 使用者无法证明二进制来源、依赖或能力；任意私钥都能产生“自带公钥”的伪信任链 | clean annotated tag、exact SHA、no-clobber asset、源码公钥 DER 指纹、私钥派生公钥逐字节匹配、解包复验、错误 key/tamper 负例 |
 | UPG-095 | 文档只保留 README、初学者、流程树、功能取舍、运维五类 | `README.md`、`docs/` | 开发运维 | 低 | 平行历史设计文档会与 current support 漂移 | 中文内容、本地链接、命令与 help/support 抽查；English 仅用于准确术语 |
 
 ### 2.1 Foundation 与本工具的责任边界

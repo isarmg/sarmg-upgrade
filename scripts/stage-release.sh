@@ -41,12 +41,21 @@ cargo build --locked --release --target "$target"
 install -m 0755 "target/${target}/release/sarmg-upgrade" "$output/package/bin/sarmg-upgrade"
 install -m 0644 docs/operations.md "$output/package/README.md"
 install -m 0644 LICENSE-APACHE "$output/package/LICENSES/Apache-2.0.txt"
+install -m 0644 release/sarmg-upgrade-release-signing-public.pem \
+  "$output/package/RELEASE-SIGNING-PUBLIC.pem"
 install -m 0644 scripts/finalize-release.sh "$output/release-tools/"
 "$output/package/bin/sarmg-upgrade" support --json >"$output/package/adapter-catalog.json"
 python3 scripts/write-sbom.py "$output/package/SBOM.cdx.json"
 rustc --version --verbose >"$output/package/BUILD-ENVIRONMENT.txt"
 binary_sha=$(sha256sum "$output/package/bin/sarmg-upgrade" | awk '{print $1}')
 catalog_sha=$(sha256sum "$output/package/adapter-catalog.json" | awk '{print $1}')
+release_signing_public_key_sha=$(
+  openssl pkey -pubin \
+    -in "$output/package/RELEASE-SIGNING-PUBLIC.pem" \
+    -outform DER \
+    | sha256sum \
+    | awk '{print $1}'
+)
 capabilities=$(python3 - "$output/package/adapter-catalog.json" <<'PY'
 import json, sys
 with open(sys.argv[1], encoding="utf-8") as source:
@@ -65,6 +74,7 @@ cat >"$output/package/release.json" <<EOF
   "rust_version": "1.98.0",
   "binary_sha256": "${binary_sha}",
   "catalog_sha256": "${catalog_sha}",
+  "release_signing_public_key_sha256": "${release_signing_public_key_sha}",
   "manifest_versions": [2],
   "supported_capabilities": ${capabilities}
 }

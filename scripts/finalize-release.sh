@@ -14,6 +14,11 @@ if [[ ! -f $release_metadata ]]; then
   echo "staged release metadata is unavailable" >&2
   exit 1
 fi
+expected_public_key=$package/RELEASE-SIGNING-PUBLIC.pem
+if [[ ! -f $expected_public_key ]]; then
+  echo "source-bound release signing public key is unavailable" >&2
+  exit 1
+fi
 readarray -t release_identity < <(python3 - "$release_metadata" <<'PY'
 import json, pathlib, sys
 
@@ -27,10 +32,17 @@ if not isinstance(version, str) or not version:
     raise SystemExit("release metadata version is invalid")
 print(version)
 print(value["target"])
+fingerprint = value.get("release_signing_public_key_sha256")
+if not isinstance(fingerprint, str) or len(fingerprint) != 64 or any(
+    character not in "0123456789abcdef" for character in fingerprint
+):
+    raise SystemExit("release signing public key fingerprint is invalid")
+print(fingerprint)
 PY
 )
 version=${release_identity[0]}
 target=${release_identity[1]}
+expected_public_key_sha=${release_identity[2]}
 archive="sarmg-upgrade-${version}-linux-x86_64.tar.zst"
 
 if [[ -e $output ]]; then
@@ -43,8 +55,23 @@ if [[ ! -f $private_key ]]; then
 fi
 umask 077
 mkdir "$output"
-openssl pkey -in "$private_key" -pubout -out "$package/RELEASE-SIGNING-PUBLIC.pem"
-chmod 0644 "$package/RELEASE-SIGNING-PUBLIC.pem"
+temporary=$(mktemp -d)
+trap 'rm -rf "$temporary"' EXIT
+derived_public_key=$temporary/derived-release-signing-public.pem
+openssl pkey -in "$private_key" -pubout -out "$derived_public_key"
+if ! cmp -s "$expected_public_key" "$derived_public_key"; then
+  echo "release signing private key does not match the source-bound public key" >&2
+  exit 1
+fi
+actual_public_key_sha=$(
+  openssl pkey -pubin -in "$expected_public_key" -outform DER \
+    | sha256sum \
+    | awk '{print $1}'
+)
+if [[ $actual_public_key_sha != "$expected_public_key_sha" ]]; then
+  echo "release signing public key does not match release metadata" >&2
+  exit 1
+fi
 (
   cd "$package"
   find . -type f ! -name SHA256SUMS ! -name SHA256SUMS.sig -print0 \
@@ -59,13 +86,14 @@ tar --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric-owner \
   --mode='u+rwX,go+rX,go-w' -C "$package" -cf - . | zstd -19 -T0 -o "$output/$archive"
 sha256sum "$output/$archive" >"$output/$archive.sha256"
 
-temporary=$(mktemp -d)
-trap 'rm -rf "$temporary"' EXIT
-zstd -dc "$output/$archive" | tar -xf - -C "$temporary"
-(cd "$temporary" && sha256sum --check SHA256SUMS)
-openssl pkeyutl -verify -rawin -pubin -inkey "$temporary/RELEASE-SIGNING-PUBLIC.pem" \
-  -in "$temporary/SHA256SUMS" -sigfile "$temporary/SHA256SUMS.sig"
-cmp "$package/adapter-catalog.json" "$temporary/adapter-catalog.json"
-"$temporary/bin/sarmg-upgrade" support --json >"$temporary/actual-support.json"
-cmp "$temporary/adapter-catalog.json" "$temporary/actual-support.json"
+extracted=$temporary/extracted
+mkdir "$extracted"
+zstd -dc "$output/$archive" | tar -xf - -C "$extracted"
+(cd "$extracted" && sha256sum --check SHA256SUMS)
+cmp "$expected_public_key" "$extracted/RELEASE-SIGNING-PUBLIC.pem"
+openssl pkeyutl -verify -rawin -pubin -inkey "$expected_public_key" \
+  -in "$extracted/SHA256SUMS" -sigfile "$extracted/SHA256SUMS.sig"
+cmp "$package/adapter-catalog.json" "$extracted/adapter-catalog.json"
+"$extracted/bin/sarmg-upgrade" support --json >"$temporary/actual-support.json"
+cmp "$extracted/adapter-catalog.json" "$temporary/actual-support.json"
 test "$target" = x86_64-unknown-linux-gnu

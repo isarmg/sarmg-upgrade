@@ -146,6 +146,13 @@ annotated `v0.2.0` 触发构建和发布两阶段：完整 Rust 门禁，暂存 
 CycloneDX SBOM、环境和 provenance；发布 job 不 checkout source，签名 `SHA256SUMS`，解包复验后发布固定
 `.tar.zst` 和 outer digest。已有 tag/release/asset 不覆盖。发布验收必须确认 binary 输出没有历史 edge。
 
+Ed25519 信任锚固定在 `release/sarmg-upgrade-release-signing-public.pem`。其 DER 编码 SHA-256 必须为
+`547e3a4566e7db00725b0bb764125a5dc9152ac06942957cf406de3de2b71ef5`，stage 会把公钥和该指纹写入
+source-bound package/release metadata。publish job 从 `RELEASE_SIGNING_KEY_PEM` Secret 取得私钥后，必须先
+派生公钥并与上述源码公钥逐字节相等；缺少 Secret、错误私钥、公钥漂移或 metadata 指纹漂移均在产生签名
+前失败。轮换密钥是新的明确发行合同：先在独立安全变更中提交新公钥、指纹、文档和负例，再原子更新
+Secret；不得同时接受新旧两把 key，也不得从下载归档本身建立唯一信任。
+
 Foundation 依赖是发布输入而不是运行时服务。发行前另行核对：
 
 1. `sarmg-contracts` 与 `sarmg-schema-identity` 均精确为 `=0.3.0`，Git rev 精确为
@@ -156,6 +163,7 @@ Foundation 依赖是发布输入而不是运行时服务。发行前另行核对
 4. SBOM/provenance 同时记录两个 crate 的版本与来源 revision；
 5. 从 clean checkout 离线复建后，Host/Sunshine/Media fixture 的 SHA 与 code-owned official identity 相等；
 6. `support --json` 中仍不存在历史 edge，CLI 中不存在 `upgrade-*` 命令。
+7. staged `RELEASE-SIGNING-PUBLIC.pem`、源码公钥、`release.json` 指纹与 Secret 私钥派生公钥四者一致。
 
 禁止为了处理依赖不可用而复制 Foundation 源文件、放宽到 `^0.3`、改用分支 HEAD、workspace sibling、
 Cargo path dependency 或本地副本，或增加旧 manifest/fingerprint fallback。依赖或合同不匹配时发行必须

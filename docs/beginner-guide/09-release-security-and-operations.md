@@ -9,6 +9,12 @@ CycloneDX SBOM、环境和 provenance。publish job 不 checkout source，以 Ed
 snapshot、SBOM、构建环境和 provenance 绑定在一起；finalize/publish 只消费已暂存且已验证的内容，不能在
 发布 job 重新 checkout 一个可能漂移的源码树。annotated tag、release 与 asset 都不覆盖。
 
+发行公钥不是 publish job 临时生成的身份。源码固定
+`release/sarmg-upgrade-release-signing-public.pem`，DER SHA-256 为
+`547e3a4566e7db00725b0bb764125a5dc9152ac06942957cf406de3de2b71ef5`；stage 把它及指纹绑定进 package。
+finalize 从 GitHub Secret 私钥派生公钥并逐字节比较，只有完全相等才可签名。因此 Secret 配错会中止发行，
+不会悄悄生成另一套“看似有效”的自签名资产。密钥轮换必须删除旧信任，只发布一个新的明确合同。
+
 Foundation 两个 crate 均精确固定为 `=0.3.0`，Git rev 固定为
 `1fe326081cfd896f05ff502e80f99504797c14c6`，它们是不可变供应链输入。不得为了构建成功放宽 semver、
 切到 branch HEAD、workspace sibling、Cargo path dependency、复制旧源码或启用本地 fallback；否则同一
@@ -16,7 +22,8 @@ Upgrade 版本可能产生不同线协议。
 
 ## 9.2 操作者验签
 
-在触碰生产前，用独立可信渠道得到 public key，验证 `SHA256SUMS` 签名、outer digest、archive checksum，
+在触碰生产前，从受审核 tag 的上述源码路径或另一独立可信渠道取得 public key，并先核对固定 DER 指纹；
+再验证 `SHA256SUMS` 签名、outer digest、archive checksum，
 解包后再次核对 binary identity/support/catalog。不要直接执行下载目录里未验制品。
 
 验证至少覆盖两层摘要：归档/outer digest 证明运输对象，解包后 binary SHA 与 release metadata 证明实际执行
