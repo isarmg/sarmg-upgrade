@@ -30,14 +30,14 @@ fi
 umask 077
 mkdir -p "$output/package/bin" "$output/package/LICENSES" "$output/release-tools"
 cargo build --locked --release --target "$target"
-install -m 0755 "target/${target}/release/isarmg-upgrade" "$output/package/bin/isarmg-upgrade"
-install -m 0644 README.md SECURITY.md "$output/package/"
+install -m 0755 "target/${target}/release/sarmg-upgrade" "$output/package/bin/sarmg-upgrade"
+install -m 0644 docs/operations.md "$output/package/README.md"
 install -m 0644 LICENSE-APACHE "$output/package/LICENSES/Apache-2.0.txt"
 install -m 0644 scripts/finalize-release.sh "$output/release-tools/"
-"$output/package/bin/isarmg-upgrade" support --json >"$output/package/adapter-catalog.json"
+"$output/package/bin/sarmg-upgrade" support --json >"$output/package/adapter-catalog.json"
 python3 scripts/write-sbom.py "$output/package/SBOM.cdx.json"
 rustc --version --verbose >"$output/package/BUILD-ENVIRONMENT.txt"
-binary_sha=$(sha256sum "$output/package/bin/isarmg-upgrade" | awk '{print $1}')
+binary_sha=$(sha256sum "$output/package/bin/sarmg-upgrade" | awk '{print $1}')
 catalog_sha=$(sha256sum "$output/package/adapter-catalog.json" | awk '{print $1}')
 capabilities=$(python3 - "$output/package/adapter-catalog.json" <<'PY'
 import json, sys
@@ -48,7 +48,7 @@ PY
 )
 cat >"$output/package/release.json" <<EOF
 {
-  "product": "isarmg-upgrade",
+  "product": "sarmg-upgrade",
   "version": "${version}",
   "source_revision": "${revision}",
   "target": "${target}",
@@ -64,9 +64,9 @@ cat >"$output/package/provenance.json" <<EOF
   "builder": "github-actions/ubuntu-24.04",
   "source_revision": "${revision}",
   "subject_sha256": "${binary_sha}",
-  "build_type": "isarmg-upgrade/formal-release-v1"
+  "build_type": "sarmg-upgrade/formal-release-v1"
 }
 EOF
 find "$output/package" -type d -exec chmod 0755 {} +
 find "$output/package" -type f -exec chmod 0644 {} +
-chmod 0755 "$output/package/bin/isarmg-upgrade" "$output/release-tools/finalize-release.sh"
+chmod 0755 "$output/package/bin/sarmg-upgrade" "$output/release-tools/finalize-release.sh"

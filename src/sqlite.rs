@@ -3,7 +3,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     os::fd::AsRawFd,
-    os::unix::fs::OpenOptionsExt,
+    os::unix::fs::{MetadataExt, OpenOptionsExt},
     path::{Component, Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -31,50 +31,16 @@ use crate::{
 };
 
 mod restore;
-mod upgrade;
 pub use restore::{
     RecoveryAction, RecoveryResult, RestoreExisting, RestoreResult, recover_sqlite_restore,
     restore_sqlite_backup, restore_sqlite_backup_with_credentials,
 };
-pub use upgrade::{
-    DufsCompositeBackupManifest, DufsCurrentBackupManifest, DufsCurrentOptions,
-    DufsCurrentRestoreOptions, DufsRecoveryOptions, DufsStoredResource, DufsTreeBudget,
-    DufsUpgradeOptions, DufsUpgradeResult, SentinelCompanionContract, SentinelRecordingArchive,
-    SentinelRecoveryOptions, SentinelSourceBackupManifest, SentinelStoredFile,
-    SentinelUpgradeOptions, SentinelUpgradeResult, SqliteUpgradeResult, VerifiedDufsCurrentBackup,
-    VerifiedDufsSourceBackup, VerifiedSentinelSourceBackup, VerifiedSourceBackup,
-    backup_dufs_current, recover_dufs_upgrade, recover_sentinel_upgrade, restore_dufs_current,
-    sentinel_credentials_key_from_file, upgrade_dufs, upgrade_sentinel, upgrade_sqlite,
-    verify_dufs_current_backup, verify_dufs_source_backup, verify_sentinel_source_backup,
-    verify_source_backup,
-};
-
-pub(crate) fn verify_sentinel_current_credentials(
-    database: &Path,
-    key_id: &str,
-    key: &[u8; 32],
-) -> anyhow::Result<()> {
-    upgrade::verify_current_credentials_contract(database, key_id, key)
-}
-
-pub(crate) fn verify_sentinel_current_recordings(
-    database: &Path,
-    recordings: &Path,
-) -> anyhow::Result<()> {
-    upgrade::verify_current_recordings_contract(database, recordings)
-}
-
-pub(crate) fn verify_sentinel_current_companion(
-    config: &Path,
-    contract: &Path,
-    recordings: &Path,
-) -> anyhow::Result<()> {
-    upgrade::verify_current_companion_contract(config, contract, recordings)
-}
 
 const DATABASE_FILE: &str = "database.sqlite3";
 const MANIFEST_FILE: &str = "manifest.json";
 const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
+const MAX_CREDENTIAL_KEY_BYTES: u64 = 4096;
+#[cfg(test)]
 pub(super) const PRODUCT_METADATA_DDL: &str = "CREATE TABLE product_metadata (\n\
     singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton=1),\n\
     application TEXT NOT NULL,\n\
@@ -89,7 +55,7 @@ pub(super) const HOST_CURRENT_SCHEMA_SHA256: &str =
 pub(super) const SUNSHINE_CURRENT_APPLICATION_VERSION: &str = "0.7.0";
 pub(super) const SUNSHINE_CURRENT_SCHEMA_REVISION: u64 = 1;
 pub(super) const SUNSHINE_CURRENT_SCHEMA_SHA256: &str =
-    "8618a2ac77bb67378bdcca3af390c711e64e742c5d81d04072c98845bdc9f4df";
+    "a8e2fe3c3a9a59a9a36979bcef3628299832d02078e421953ab78e0c0900d5a7";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct OfficialSqliteIdentity {
@@ -358,6 +324,60 @@ fn validate_key_id(value: &str) -> anyhow::Result<()> {
         "credentials key id is invalid"
     );
     Ok(())
+}
+
+/// Read a private base64-encoded 32-byte key without following a final symlink.
+///
+/// This helper is product-neutral and remains part of the reusable backup layer;
+/// it does not recognize any historical database generation.
+pub fn credentials_key_from_file(path: &Path) -> anyhow::Result<[u8; 32]> {
+    let named_before = fs::symlink_metadata(path).context("inspect credentials key file")?;
+    ensure!(
+        named_before.is_file()
+            && named_before.nlink() == 1
+            && named_before.mode() & 0o077 == 0
+            && named_before.len() <= MAX_CREDENTIAL_KEY_BYTES,
+        "credentials key must be a private, single-link, bounded regular file"
+    );
+    let descriptor = open(
+        path,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .context("open credentials key file")?;
+    let mut file = File::from(descriptor);
+    let opened_before = file.metadata()?;
+    ensure!(
+        opened_before.dev() == named_before.dev()
+            && opened_before.ino() == named_before.ino()
+            && opened_before.nlink() == 1
+            && opened_before.mode() & 0o077 == 0,
+        "credentials key path changed while it was opened"
+    );
+    let mut bytes = Vec::with_capacity(opened_before.len() as usize);
+    Read::by_ref(&mut file)
+        .take(MAX_CREDENTIAL_KEY_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    let opened_after = file.metadata()?;
+    let named_after = fs::symlink_metadata(path)?;
+    ensure!(
+        bytes.len() as u64 == opened_before.len()
+            && opened_after.dev() == opened_before.dev()
+            && opened_after.ino() == opened_before.ino()
+            && opened_after.len() == opened_before.len()
+            && opened_after.mtime() == opened_before.mtime()
+            && opened_after.mtime_nsec() == opened_before.mtime_nsec()
+            && named_after.dev() == opened_after.dev()
+            && named_after.ino() == opened_after.ino()
+            && named_after.mode() & 0o077 == 0,
+        "credentials key file changed while it was read"
+    );
+    let encoded = String::from_utf8(bytes).context("credentials key file is not UTF-8")?;
+    STANDARD
+        .decode(encoded.trim())
+        .context("credentials key file must contain base64")?
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("credentials key must decode to exactly 32 bytes"))
 }
 
 pub(super) fn verify_sunshine_encrypted_values(
@@ -991,9 +1011,10 @@ fn secure_resolve_flags() -> ResolveFlags {
 mod tests {
     use super::*;
 
-    const HOST_CURRENT_SCHEMA_SQL: &str = include_str!("upgrades/host_0_6_to_0_7/target.sql");
+    const HOST_CURRENT_SCHEMA_SQL: &str =
+        include_str!("../tests/fixtures/current/host-monitoring.sql");
     const SUNSHINE_CURRENT_SCHEMA_SQL: &str =
-        include_str!("upgrades/sunshine_0_6_to_0_7/target.sql");
+        include_str!("../tests/fixtures/current/sunshine-manager.sql");
 
     pub(super) fn create_current_database(path: &Path, product: Product, version: &str) {
         let official = official_sqlite_identity(product).unwrap();

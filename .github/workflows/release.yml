@@ -34,13 +34,13 @@ jobs:
       - name: Stage unsigned release input
         env:
           RUSTUP_TOOLCHAIN: 1.98.0
-        run: ./scripts/stage-release.sh "$RUNNER_TEMP/isarmg-upgrade-stage"
+        run: ./scripts/stage-release.sh "$RUNNER_TEMP/sarmg-upgrade-stage"
       - name: Upload immutable release input
         id: upload
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: isarmg-upgrade-release-input-${{ github.sha }}
-          path: ${{ runner.temp }}/isarmg-upgrade-stage
+          name: sarmg-upgrade-release-input-${{ github.sha }}
+          path: ${{ runner.temp }}/sarmg-upgrade-stage
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
@@ -55,7 +55,7 @@ jobs:
       - name: Download only the verified build output
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: isarmg-upgrade-release-input-${{ github.sha }}
+          name: sarmg-upgrade-release-input-${{ github.sha }}
           path: ${{ runner.temp }}/release-input
       - name: Install archive dependency
         run: sudo apt-get update && sudo apt-get install --yes zstd
@@ -79,6 +79,6 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
-            --title "isarmg-upgrade 0.2.0" \
+            --title "sarmg-upgrade 0.2.0" \
             --generate-notes \
             "$RUNNER_TEMP/final-release/"*

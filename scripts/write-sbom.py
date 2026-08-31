@@ -24,7 +24,7 @@ document = {
     "bomFormat": "CycloneDX",
     "specVersion": "1.5",
     "version": 1,
-    "metadata": {"component": {"type": "application", "name": "isarmg-upgrade", "version": "0.2.0"}},
+    "metadata": {"component": {"type": "application", "name": "sarmg-upgrade", "version": "0.2.0"}},
     "components": components,
 }
 pathlib.Path(sys.argv[1]).write_text(

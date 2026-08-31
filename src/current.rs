@@ -23,15 +23,11 @@ const MAX_MANIFEST_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_TREE_ENTRIES: u64 = 2_000_000;
 const MAX_TREE_DEPTH: usize = 128;
 
-const PHOTO_VERSION: &str = "0.2.0";
-const PHOTO_SCHEMA_REVISION: u64 = 1;
+const MEDIA_VERSION: &str = "0.2.0";
+const MEDIA_SCHEMA_REVISION: u64 = 1;
 // Updated by the final contract-generation pass whenever the current schema changes.
-const PHOTO_SCHEMA_SHA256: &str =
+const MEDIA_SCHEMA_SHA256: &str =
     "a464584cf7a55f9e50cb85bb539b1f42a9285f707440bb0bcfcd31a6b3a083c0";
-const SENTINEL_VERSION: &str = "0.2.0";
-const SENTINEL_SCHEMA_REVISION: u64 = 1;
-const SENTINEL_SCHEMA_SHA256: &str =
-    "b089342e00e672d6e6c679e15f331c90e599129371042a37948a4b53e5f8e49e";
 
 #[derive(Clone)]
 pub struct CompositeCurrentOptions {
@@ -591,13 +587,9 @@ fn validate_options(options: &CompositeCurrentOptions) -> anyhow::Result<()> {
         "backup output and data tree must be disjoint"
     );
     match options.product {
-        Product::SentinelMonitor => ensure!(
-            options.credentials().is_some() && options.configuration.len() == 2,
-            "Sentinel current adapter requires its key, config, and companion contract"
-        ),
-        Product::PhotoBackup => ensure!(
+        Product::MediaBackup => ensure!(
             options.credentials().is_none() && options.configuration.is_empty(),
-            "Photo current adapter does not accept external key or configuration resources"
+            "Media current adapter does not accept external key or configuration resources"
         ),
         _ => anyhow::bail!(
             "no strict composite current adapter for {}",
@@ -609,12 +601,7 @@ fn validate_options(options: &CompositeCurrentOptions) -> anyhow::Result<()> {
 
 fn product_contract(product: Product) -> anyhow::Result<(&'static str, u64, &'static str)> {
     match product {
-        Product::PhotoBackup => Ok((PHOTO_VERSION, PHOTO_SCHEMA_REVISION, PHOTO_SCHEMA_SHA256)),
-        Product::SentinelMonitor => Ok((
-            SENTINEL_VERSION,
-            SENTINEL_SCHEMA_REVISION,
-            SENTINEL_SCHEMA_SHA256,
-        )),
+        Product::MediaBackup => Ok((MEDIA_VERSION, MEDIA_SCHEMA_REVISION, MEDIA_SCHEMA_SHA256)),
         _ => anyhow::bail!("unsupported composite current product {product}"),
     }
 }
@@ -665,15 +652,11 @@ fn verify_database(product: Product, path: &Path) -> anyhow::Result<SchemaIdenti
 
 fn verify_external_key(
     product: Product,
-    database: &Path,
+    _database: &Path,
     credentials: Option<(&str, &[u8; 32])>,
 ) -> anyhow::Result<()> {
     match (product, credentials) {
-        (Product::SentinelMonitor, Some((kid, key))) => {
-            crate::sqlite::verify_sentinel_current_credentials(database, kid, key)
-        }
-        (Product::SentinelMonitor, None) => anyhow::bail!("Sentinel credentials key is required"),
-        (Product::PhotoBackup, None) => Ok(()),
+        (Product::MediaBackup, None) => Ok(()),
         _ => anyhow::bail!("external credentials are not valid for {product}"),
     }
 }
@@ -695,33 +678,19 @@ fn external_requirements(
 
 fn verify_product_state(product: Product, database: &Path, tree: &Path) -> anyhow::Result<()> {
     match product {
-        Product::PhotoBackup => verify_photo_state(database, tree),
-        Product::SentinelMonitor => {
-            crate::sqlite::verify_sentinel_current_recordings(database, tree)
-        }
+        Product::MediaBackup => verify_media_state(database, tree),
         _ => anyhow::bail!("unsupported current product {product}"),
     }
 }
 
-fn verify_configuration(product: Product, files: &[NamedFile], tree: &Path) -> anyhow::Result<()> {
+fn verify_configuration(product: Product, files: &[NamedFile], _tree: &Path) -> anyhow::Result<()> {
     match product {
-        Product::PhotoBackup => {
-            ensure!(files.is_empty(), "Photo has no configuration resources");
+        Product::MediaBackup => {
+            ensure!(
+                files.is_empty(),
+                "Media Backup has no configuration resources"
+            );
             Ok(())
-        }
-        Product::SentinelMonitor => {
-            let files = files
-                .iter()
-                .map(|file| (file.name.as_str(), file.path.as_path()))
-                .collect::<BTreeMap<_, _>>();
-            ensure!(files.len() == 2, "Sentinel configuration set is not exact");
-            let config = files
-                .get("mediamtx.yml")
-                .context("Sentinel config resource is missing")?;
-            let contract = files
-                .get("mediamtx.lock")
-                .context("Sentinel companion contract is missing")?;
-            crate::sqlite::verify_sentinel_current_companion(config, contract, tree)
         }
         _ => anyhow::bail!("unsupported current product {product}"),
     }
@@ -742,7 +711,7 @@ fn verify_configuration_journal(
     verify_configuration(product, &named, tree)
 }
 
-fn verify_photo_state(database: &Path, tree: &Path) -> anyhow::Result<()> {
+fn verify_media_state(database: &Path, tree: &Path) -> anyhow::Result<()> {
     let connection = Connection::open_with_flags(database, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let mut statement = connection.prepare(
         "SELECT a.storage_path,b.storage_path,b.stored_size,b.content_blake3 \
@@ -760,16 +729,16 @@ fn verify_photo_state(database: &Path, tree: &Path) -> anyhow::Result<()> {
         let (account, blob, bytes, expected_blake3) = row?;
         validate_relative(&account)?;
         validate_relative(&blob)?;
-        ensure!(bytes >= 0, "Photo blob has a negative stored size");
+        ensure!(bytes >= 0, "Media Backup blob has a negative stored size");
         let path = tree.join(account).join(blob);
         let metadata = fs::symlink_metadata(&path)?;
         ensure!(
             metadata.is_file() && metadata.nlink() == 1,
-            "Photo blob is not a single-link regular file"
+            "Media Backup blob is not a single-link regular file"
         );
         ensure!(
             metadata.len() == bytes as u64,
-            "Photo blob size differs from SQLite"
+            "Media Backup blob size differs from SQLite"
         );
         let mut hasher = blake3::Hasher::new();
         let mut file = File::open(&path)?;
@@ -783,7 +752,7 @@ fn verify_photo_state(database: &Path, tree: &Path) -> anyhow::Result<()> {
         }
         ensure!(
             hasher.finalize().to_hex().as_str() == expected_blake3,
-            "Photo blob BLAKE3 differs from SQLite"
+            "Media Backup blob BLAKE3 differs from SQLite"
         );
     }
     Ok(())
@@ -962,14 +931,9 @@ fn validate_manifest(manifest: &CurrentBackupManifest) -> anyhow::Result<()> {
     validate_sha256(&manifest.tree.sha256)?;
     validate_sha256(&manifest.source_tree_identity_sha256)?;
     match manifest.product {
-        Product::PhotoBackup => ensure!(
+        Product::MediaBackup => ensure!(
             manifest.external_requirements.is_empty(),
-            "Photo backup unexpectedly requires an external key"
-        ),
-        Product::SentinelMonitor => ensure!(
-            manifest.external_requirements.len() == 1
-                && manifest.external_requirements[0].kind == "credentials-key",
-            "Sentinel backup lacks its credentials key requirement"
+            "Media backup unexpectedly requires an external key"
         ),
         _ => unreachable!(),
     }
@@ -985,23 +949,14 @@ impl ProductLocks {
         product: Product,
         database: &Path,
         tree: &Path,
-        runtime: Option<&Path>,
+        _runtime: Option<&Path>,
     ) -> anyhow::Result<Self> {
         let mut files = Vec::new();
         let locks = match product {
-            Product::PhotoBackup => vec![
-                sibling(database, "photo-backup.lock")?,
-                sibling(tree, "photo-backup.lock")?,
+            Product::MediaBackup => vec![
+                sibling(database, "media-backup.lock")?,
+                sibling(tree, "media-backup.lock")?,
             ],
-            Product::SentinelMonitor => {
-                let runtime =
-                    runtime.context("Sentinel current adapter requires --runtime-directory")?;
-                vec![
-                    sibling(database, "sentinel-monitor.maintenance.lock")?,
-                    runtime.join("app.lock"),
-                    runtime.join("mediamtx.lock"),
-                ]
-            }
             _ => anyhow::bail!("unsupported product lock contract"),
         };
         let mut seen = BTreeSet::new();
@@ -1217,7 +1172,7 @@ fn validate_sha256(value: &str) -> anyhow::Result<()> {
 fn path_identity_sha256(path: &Path) -> anyhow::Result<String> {
     let metadata = fs::symlink_metadata(path)?;
     let mut hasher = Sha256::new();
-    hasher.update(b"isarmg-current-tree-identity-v1\0");
+    hasher.update(b"sarmg-current-tree-identity-v1\0");
     hasher.update(metadata.dev().to_be_bytes());
     hasher.update(metadata.ino().to_be_bytes());
     Ok(lower_hex(&hasher.finalize()))

@@ -338,69 +338,6 @@ fn verify_official_recovery_generation(
     Ok(())
 }
 
-pub(super) fn recover_sqlite_restore_under_lock_with_verifier(
-    recovery_path: &Path,
-    expected_product: Product,
-    expected_database: &Path,
-    expected_identity: &SchemaIdentity,
-    maintenance: &MaintenanceLock,
-    action: RecoveryAction,
-    verify_incoming: impl Fn(&Path) -> anyhow::Result<()>,
-) -> anyhow::Result<RecoveryResult> {
-    let recovery = RecoveryDirectory::open(recovery_path)?;
-    let journal = recovery.read_journal()?;
-    journal.validate()?;
-    recovery.validate_name(&journal)?;
-    ensure!(
-        journal.product == expected_product,
-        "recovery journal belongs to a different product"
-    );
-    ensure!(
-        &journal.schema_identity == expected_identity
-            && journal.application_version == expected_identity.application_version,
-        "recovery journal belongs to a different target generation"
-    );
-    let destination = recovery
-        .configured_path
-        .parent()
-        .context("recovery directory must have a parent")?
-        .join(&journal.destination_name);
-    ensure!(
-        absolute_path(expected_database)? == destination,
-        "recovery journal destination does not match the explicit database"
-    );
-    if action == RecoveryAction::Commit {
-        verify_composite_recovery_incoming(&recovery, &journal, &verify_incoming)?;
-    }
-    recover_sqlite_restore_locked(recovery, journal, destination, maintenance, action)
-}
-
-fn verify_composite_recovery_incoming(
-    recovery: &RecoveryDirectory,
-    journal: &RestoreJournal,
-    verify: &impl Fn(&Path) -> anyhow::Result<()>,
-) -> anyhow::Result<()> {
-    let mut verified = false;
-    for (parent, name) in [
-        (&recovery.directory.file, INCOMING_FILE),
-        (&recovery.directory.file, "abandoned-new.sqlite3"),
-        (&recovery.parent.file, journal.destination_name.as_str()),
-    ] {
-        let Some((bytes, sha256)) = regular_file_hash_if_present(parent, name)? else {
-            continue;
-        };
-        if bytes == journal.incoming_bytes && sha256 == journal.incoming_sha256 {
-            verify(&child_path(parent, name))?;
-            verified = true;
-        }
-    }
-    ensure!(
-        verified,
-        "composite recovery has no verifiable exact incoming generation"
-    );
-    Ok(())
-}
-
 fn recover_sqlite_restore_locked(
     recovery: RecoveryDirectory,
     journal: RestoreJournal,
@@ -447,55 +384,6 @@ pub(super) enum RestorePoint {
     OriginalsPreserved,
     Installed,
     Verified,
-}
-
-/// Replace the locked generation with one already-created current database.
-///
-/// The caller retains the exclusive maintenance lock from source validation
-/// through installation, so an upgrade cannot race a product runtime between
-/// copying data and the durable switch.
-pub(super) fn replace_with_staged_database(
-    maintenance: &MaintenanceLock,
-    staged_directory: &Path,
-    product: Product,
-    expected_identity: &SchemaIdentity,
-    hook: impl FnMut(RestorePoint) -> anyhow::Result<()>,
-) -> anyhow::Result<()> {
-    let originals = inspect_original_generation(&maintenance.location)?;
-    ensure!(
-        originals
-            .iter()
-            .any(|entry| OsStr::new(&entry.destination_name) == maintenance.location.database_name),
-        "upgrade source database disappeared before installation"
-    );
-    let recovery = RecoveryDirectory::create(&maintenance.location, product)?;
-    let mut mutation_started = false;
-    let attempt = restore_prepared(
-        staged_directory,
-        &maintenance.location,
-        &recovery,
-        originals,
-        product,
-        expected_identity,
-        &mut mutation_started,
-        hook,
-    );
-    match attempt {
-        Ok(()) => recovery.cleanup().with_context(|| {
-            format!(
-                "upgrade is installed and verified, but recovery cleanup is incomplete at {}",
-                recovery.configured_path.display()
-            )
-        }),
-        Err(error) if !mutation_started => {
-            let _ = recovery.cleanup();
-            Err(error.context("upgrade installation failed before the source was changed"))
-        }
-        Err(error) => Err(error.context(format!(
-            "upgrade was interrupted after source mutation; recovery evidence is preserved at {}",
-            recovery.configured_path.display()
-        ))),
-    }
 }
 
 #[allow(clippy::too_many_arguments)]

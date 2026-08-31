@@ -56,7 +56,7 @@ impl CurrentStateSupport {
 pub fn support_matrix() -> SupportMatrix {
     let products = vec![
         ProductSupport {
-            product: Product::PhotoBackup,
+            product: Product::MediaBackup,
             current_state: CurrentStateSupport::exact("0.2.0", true),
             upgrade_edges: Vec::new(),
             external_requirements: Vec::new(),
@@ -64,41 +64,29 @@ pub fn support_matrix() -> SupportMatrix {
         ProductSupport {
             product: Product::HostMonitoring,
             current_state: CurrentStateSupport::exact("0.7.0", true),
-            upgrade_edges: vec![UpgradeEdge {
-                from: "0.6.0",
-                to: "0.7.0",
-            }],
+            upgrade_edges: Vec::new(),
             external_requirements: Vec::new(),
         },
         ProductSupport {
             product: Product::SunshineManager,
             current_state: CurrentStateSupport::exact("0.7.0", false),
-            upgrade_edges: vec![UpgradeEdge {
-                from: "0.6.0",
-                to: "0.7.0",
-            }],
+            upgrade_edges: Vec::new(),
             external_requirements: vec!["credentials-key"],
         },
         ProductSupport {
             product: Product::SentinelMonitor,
-            current_state: CurrentStateSupport::exact("0.2.0", true),
-            upgrade_edges: vec![UpgradeEdge {
-                from: "0.1.0",
-                to: "0.2.0",
-            }],
+            current_state: CurrentStateSupport::none(),
+            upgrade_edges: Vec::new(),
             external_requirements: vec!["credentials-key"],
         },
         ProductSupport {
             product: Product::DufsRam,
-            current_state: CurrentStateSupport::exact("0.50.0", false),
-            upgrade_edges: vec![UpgradeEdge {
-                from: "0.49.7",
-                to: "0.50.0",
-            }],
+            current_state: CurrentStateSupport::none(),
+            upgrade_edges: Vec::new(),
             external_requirements: Vec::new(),
         },
         ProductSupport {
-            product: Product::IsarmgFoundation,
+            product: Product::SarmgFoundation,
             current_state: CurrentStateSupport::none(),
             upgrade_edges: Vec::new(),
             external_requirements: Vec::new(),
@@ -138,7 +126,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_product_appears_once_and_sunshine_requires_its_key() {
+    fn every_product_appears_once_and_no_development_upgrade_edge_is_advertised() {
         let matrix = support_matrix();
         assert_eq!(matrix.products.len(), Product::ALL.len());
         for product in Product::ALL {
@@ -159,8 +147,14 @@ mod tests {
         assert_eq!(sunshine.external_requirements, ["credentials-key"]);
         assert!(
             matrix
+                .products
+                .iter()
+                .all(|entry| entry.upgrade_edges.is_empty())
+        );
+        assert!(
+            matrix
                 .supported_capabilities
-                .contains(&"photo-backup-current-restore-0.2.0".to_owned())
+                .contains(&"media-backup-current-restore-0.2.0".to_owned())
         );
     }
 }

@@ -8,7 +8,7 @@ fi
 package=$1
 private_key=$2
 output=$3
-archive=isarmg-upgrade-0.2.0-linux-x86_64.tar.zst
+archive=sarmg-upgrade-0.2.0-linux-x86_64.tar.zst
 
 if [[ -e $output ]]; then
   echo "final release output already exists" >&2
@@ -43,5 +43,5 @@ zstd -dc "$output/$archive" | tar -xf - -C "$temporary"
 openssl pkeyutl -verify -rawin -pubin -inkey "$temporary/RELEASE-SIGNING-PUBLIC.pem" \
   -in "$temporary/SHA256SUMS" -sigfile "$temporary/SHA256SUMS.sig"
 cmp "$package/adapter-catalog.json" "$temporary/adapter-catalog.json"
-"$temporary/bin/isarmg-upgrade" support --json >"$temporary/actual-support.json"
+"$temporary/bin/sarmg-upgrade" support --json >"$temporary/actual-support.json"
 cmp "$temporary/adapter-catalog.json" "$temporary/actual-support.json"

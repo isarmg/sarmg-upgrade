@@ -6,38 +6,38 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Product {
-    PhotoBackup,
+    MediaBackup,
     HostMonitoring,
     SunshineManager,
     SentinelMonitor,
     DufsRam,
-    IsarmgFoundation,
+    SarmgFoundation,
 }
 
 impl Product {
     pub const ALL: [Self; 6] = [
-        Self::PhotoBackup,
+        Self::MediaBackup,
         Self::HostMonitoring,
         Self::SunshineManager,
         Self::SentinelMonitor,
         Self::DufsRam,
-        Self::IsarmgFoundation,
+        Self::SarmgFoundation,
     ];
 
     pub const fn slug(self) -> &'static str {
         match self {
-            Self::PhotoBackup => "photo-backup",
+            Self::MediaBackup => "media-backup",
             Self::HostMonitoring => "host-monitoring",
             Self::SunshineManager => "sunshine-manager",
             Self::SentinelMonitor => "sentinel-monitor",
             Self::DufsRam => "dufs-ram",
-            Self::IsarmgFoundation => "isarmg-foundation",
+            Self::SarmgFoundation => "sarmg-foundation",
         }
     }
 
     pub const fn contract(self) -> ProductContract {
         match self {
-            Self::PhotoBackup => ProductContract {
+            Self::MediaBackup => ProductContract {
                 product: self,
                 resources: &[ResourceKind::Sqlite, ResourceKind::DataTree],
                 has_runtime_state: true,
@@ -78,7 +78,7 @@ impl Product {
             },
             // Foundation is a library repository. It participates in source/API
             // upgrades, but has no service state to back up or restore.
-            Self::IsarmgFoundation => ProductContract {
+            Self::SarmgFoundation => ProductContract {
                 product: self,
                 resources: &[],
                 has_runtime_state: false,
@@ -140,7 +140,7 @@ mod tests {
 
     #[test]
     fn foundation_has_no_runtime_backup_contract() {
-        let contract = Product::IsarmgFoundation.contract();
+        let contract = Product::SarmgFoundation.contract();
         assert!(!contract.has_runtime_state);
         assert!(contract.resources.is_empty());
         assert!(!contract.requires_external_credentials_key);

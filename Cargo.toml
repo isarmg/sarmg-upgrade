@@ -1,11 +1,11 @@
 [package]
-name = "isarmg-upgrade"
+name = "sarmg-upgrade"
 version = "0.2.0"
 edition = "2024"
 rust-version = "1.98"
 authors = ["sarmg <isarmg@163.com>"]
 license = "Apache-2.0"
-description = "Offline upgrade, backup, verification, and restore tooling for iSarmg products"
+description = "Offline upgrade, backup, verification, and restore tooling for Sarmg products"
 publish = false
 
 [dependencies]
