@@ -57,7 +57,7 @@
 
 每个演练保存“预期”和“实际”，并检查失败后 source/output/target 是否保持允许状态。最小集合还应加入：
 
-9. `support` 与 `catalog` 对 Sentinel/Dufs 的不同结论。
+9. `support` 与 `catalog` 对 Sentinel/Dufs 分别证明“能力可达”和“资源完整性”。
 10. `inspect-manifest` parse 成功但资源篡改仍被 full verify 发现。
 11. wrong product/version/schema SHA 与 extra SQLite object 拒绝。
 12. Sunshine wrong key ID、wrong bytes、unsafe key file 和密文篡改。
@@ -104,7 +104,7 @@
 | 不准确说法 | 应改成 | 原因 |
 |---|---|---|
 | “支持升级 Media/Host/Sunshine” | “支持它们的 current backup/verify/restore” | 当前无任何 historical edge |
-| “catalog 支持 Sentinel/Dufs” | “catalog 描述资源，support 无 adapter” | 资源知识不是命令能力 |
+| “catalog 支持 Sentinel/Dufs” | “catalog 描述资源，support 声明当前 adapter” | 资源知识不是命令能力 |
 | “manifest 校验通过” | 区分 parse 与 full verify | `inspect-manifest` 不读资源 |
 | “generic SQLite backup” | “仅 Host/Sunshine 的 SQLite-only adapter” | generic 机制仍有产品 allowlist |
 | “restore 覆盖目标” | “保全 original 后安装 incoming” | `--replace-existing` 不直接 overwrite |

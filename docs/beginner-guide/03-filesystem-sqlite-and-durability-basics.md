@@ -79,8 +79,8 @@ Media 当前组合目录只接受目录和普通文件。唯一 current manifest
 
 当前实现拒绝 hardlink，并不承诺保留 xattr、ACL、稀疏 extent、birth time、owner/group 或文件系统专属 flag。
 如果业务将其中任一语义纳入持久状态，必须先升级产品资源合同、manifest、复制/验证实现、预算、负例与
-恢复测试；不能因普通文件内容相同就声称已支持。Sentinel recordings 与 Dufs shared root 尚无 current
-adapter，更不存在默认继承 Media tree 语义。
+恢复测试；不能因普通文件内容相同就声称已支持。Sentinel recordings 与 Dufs shared root 已由各自的
+current adapter 严格验证，但不会默认继承 Media 的产品语义；三者只共用受测试的树 inventory 和事务原语。
 
 tree 路径必须相对于可信根且只由 normal components 组成。inventory 既用于发现 missing/extra/tamper，也
 用于在复制完成后分别读取 destination 与当时的 source，并要求两份完整 inventory 相等；当前不是“复制前、

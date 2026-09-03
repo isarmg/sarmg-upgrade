@@ -15,8 +15,8 @@ snapshot、SBOM、构建环境和 provenance 绑定在一起；finalize/publish 
 finalize 从 GitHub Secret 私钥派生公钥并逐字节比较，只有完全相等才可签名。因此 Secret 配错会中止发行，
 不会悄悄生成另一套“看似有效”的自签名资产。密钥轮换必须删除旧信任，只发布一个新的明确合同。
 
-Foundation 两个 crate 均精确固定为 `=0.3.0`，Git rev 固定为
-`1fe326081cfd896f05ff502e80f99504797c14c6`，它们是不可变供应链输入。不得为了构建成功放宽 semver、
+Foundation 两个 crate 均精确固定为 `=0.4.0`，Git rev 固定为
+`0e1be10273fd6abf72e0d0eeb24cbb1120572486`，它们是不可变供应链输入。不得为了构建成功放宽 semver、
 切到 branch HEAD、workspace sibling、Cargo path dependency、复制旧源码或启用本地 fallback；否则同一
 Upgrade 版本可能产生不同线协议。
 
@@ -95,7 +95,7 @@ Sunshine restore 残留是特殊边界：support 不公开 recover，因此保�
 不得覆盖；问题使用新版本修复。
 
 还应监控 Foundation 依赖 revision、Cargo.lock 第二版本、正式 target 漂移、support snapshot 中意外出现
-历史 edge、CLI 新增未文档命令、Sentinel/Dufs 被误列 current，以及 release archive 内存在非 AMD64 GNU
+历史 edge、CLI 新增未文档命令、Sentinel/Dufs current 能力漏列或退化为 SQLite-only，以及 release archive 内存在非 AMD64 GNU
 制品。这些都是边界变化，不是普通文档更新。
 
 ## 9.9 完成条件

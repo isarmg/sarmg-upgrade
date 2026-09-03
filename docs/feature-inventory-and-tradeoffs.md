@@ -57,12 +57,12 @@ React/Vite 或其他前端；仓库当前无需运行时配置或服务部署，
 | UPG-031 | Rust fmt/clippy/test 门禁 | Cargo、CI | 开发运维 | 中 | 路径/恢复状态机回归可进入发行 | all-targets、warnings denied |
 | UPG-032 | source-bound release、SBOM、support snapshot | `scripts/`、workflow | 开发运维 | 高 | 制品支持范围、来源和依赖不可证明 | clean tag/SHA、archive、tamper |
 | UPG-033 | 中文学习、流程、功能和运维文档 | README、`docs/` | 开发运维 | 低 | 操作者可能把开发期“无升级边”误解成自动升级 | 链接、CLI help、支持矩阵抽查 |
-| UPG-034 | Sentinel/Dufs 当前组合备份暂未实现 | support 中 current_state 为空 | 可选 | 高 | 目前不能宣称这两项目可由本工具完整备份；不得退回 generic SQLite 伪装支持 | support JSON 与 CLI 均无命令 |
+| UPG-034 | Sentinel/Dufs 当前组合备份完整闭包 | `backup-current`/`verify-current`/`restore-current`/`recover-current` | 核心 | 高 | 只处理 SQLite 会丢失配置、树和密钥绑定 | support JSON、exact resource set、配置同代替换与 recovery 集成测试 |
 | UPG-035 | 所有历史升级边当前均未实现；未来稳定 edge 只归本仓库 | `upgrade_edges=[]`，无历史 SQL/adapter/CLI；未来准入必须在 `sarmg-upgrade` 以独立 adapter/fixture/CLI/release 原子加入 | 核心 | 高 | 当前用户必须重新部署开发数据；删除此边界或暗示另有迁移仓会诱发手工改库、current restore 冒充升级或职责分裂 | 当前源码/CLI/support 无历史 edge；未来变更同时具备精确 source/target、不可变 source backup、transform、故障矩阵、recovery、support 与 release，且产品 runtime 无兼容代码 |
-| UPG-036 | Foundation 当前线协议绑定 | `sarmg-contracts`、`sarmg-schema-identity` 均精确 `=0.3.0` + Git rev `1fe326081cfd896f05ff502e80f99504797c14c6`；`SchemaIdentity`/resource/external requirement 直接复用 | 保障 | 高 | 本工具会悄悄形成第二套字段、数值范围或枚举，跨项目备份无法可靠互认 | Foundation fixtures + 本仓库更严格负例 |
+| UPG-036 | Foundation 当前线协议绑定 | `sarmg-contracts`、`sarmg-schema-identity` 均精确 `=0.4.0` + Git rev `0e1be10273fd6abf72e0d0eeb24cbb1120572486`；`SchemaIdentity`/resource/external requirement 直接复用 | 保障 | 高 | 本工具会悄悄形成第二套字段、数值范围或枚举，跨项目备份无法可靠互认 | Foundation fixtures + 本仓库更严格负例 |
 | UPG-037 | Driver-independent schema identity | `ProductMetadataRow/Column`、`SchemaRow`、canonical fingerprint | 保障 | 高 | DDL、列形状和摘要 framing 再次散落，算法修复无法一次覆盖所有消费者 | 空/多 metadata row、列漂移、fingerprint mismatch |
 | UPG-038 | rusqlite 安全适配层 | `verify_schema_identity_database`、read-only open、integrity/FK、canonical schema query | 核心 | 高 | Foundation 会被迫依赖 rusqlite，或工具只验证自报 metadata 而不验证真实数据库 | 精确当前库、错 revision/hash、任意 schema drift；不含 migration-ledger 特判 |
-| UPG-039 | 不可变 Foundation 依赖且无 fallback | Cargo exact `=0.3.0` + Git rev `1fe326081cfd896f05ff502e80f99504797c14c6`；无 workspace sibling、path dependency、可变 branch、本地复制、feature fallback 或旧协议 alias | 开发运维 | 中 | 同一 sarmg-upgrade 源码可能随 Foundation 来源变化，或旧解析路径绕过当前合同 | `cargo metadata`、lockfile、clean checkout locked build；来源和 rev 必须逐字匹配 |
+| UPG-039 | 不可变 Foundation 依赖且无 fallback | Cargo exact `=0.4.0` + Git rev `0e1be10273fd6abf72e0d0eeb24cbb1120572486`；无 workspace sibling、path dependency、可变 branch、本地复制、feature fallback 或旧协议 alias | 开发运维 | 中 | 同一 sarmg-upgrade 源码可能随 Foundation 来源变化，或旧解析路径绕过当前合同 | `cargo metadata`、lockfile、clean checkout locked build；来源和 rev 必须逐字匹配 |
 | UPG-040 | 正式发行唯一 target `x86_64-unknown-linux-gnu` | `src/support.rs::FORMAL_RELEASE_TARGET`、release scripts | 保障 | 中 | 非 AMD64/非 GNU 平台会被误认为受支持并进入事故矩阵 | `support --json.formal_release_target` 精确值；发布归档命名；不声明 ARM/musl/其他 OS |
 | UPG-041 | 工具是离线 CLI，无 Server、daemon、HTTP API 或前端 | `src/main.rs`、仓库结构 | 核心 | 中 | 引入常驻服务会新增认证、网络、并发和密钥暴露面 | 只存在 CLI subcommand；无 listener、React/Vite、`clients/`；Dufs 前端例外与本工具无关 |
 | UPG-042 | 当前无运行时配置和服务部署目录 | CLI 参数、仓库根 | 开发运维 | 低 | 新建空 `config/`/`deploy/` 会暗示不存在的配置或服务合同 | 所有产品/路径/key/动作逐次显式传入；无环境变量 fallback；未来确有配置再建立当前目录 |
@@ -77,7 +77,7 @@ React/Vite 或其他前端；仓库当前无需运行时配置或服务部署，
 | UPG-051 | Media composite manifest 唯一 current version 3 与 current adapter ID | `src/current.rs::CURRENT_MANIFEST_VERSION`、`validate_manifest` | 保障 | 中 | 双读 v2/旧清单会重新引入旧 wire 合同，手写组合清单可能混入当前恢复 | version 3 正例；v2/unknown 拒绝且无 fallback；`media-backup-current-0.2.0-r1`、tool 0.2.0、product/version/identity 全精确 |
 | UPG-052 | Media current Schema identity 固定 version 0.2.0/revision 1/SHA | `src/current.rs::product_contract` | 保障 | 中 | 错版本或 DDL 漂移进入 DB+tree 备份 | SHA `2563e6afc3fff272d02b7a5615272cc773862243bfd15aec51655abf1d9c6b1c`；metadata 与实际 schema 同验 |
 | UPG-053 | Host current identity 固定 0.7.0/revision 1/SHA | `src/sqlite.rs::official_sqlite_identity` | 保障 | 中 | generic SQLite 误接 Host 旧库或手改库 | SHA `12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05`；fixture 与 code allowlist |
-| UPG-054 | Sunshine current identity 固定 0.7.0/revision 1/SHA | `src/sqlite.rs::official_sqlite_identity` | 保障 | 中 | 密文校验前先接受错 schema，造成误读或漏扫 | SHA `a717bcd5a591e7f7cc6da5826af88ad0deab2fdc339ce4649ad84f21ea879dbc`；fixture、integrity、FK |
+| UPG-054 | Sunshine current identity 固定 0.8.0/revision 2/SHA | `src/sqlite.rs::official_sqlite_identity` | 保障 | 中 | 密文校验前先接受错 schema，造成误读或漏扫 | SHA `c9dedb33dd7a5ad613e762eb135a7aa5184ce1df52166459bee7b3485b4b3be3`；fixture、integrity、FK |
 | UPG-055 | schema fingerprint 对纳入范围的对象统一处理，无表名特判 | `verify_schema_identity_database`、`sarmg-schema-identity` | 保障 | 高 | 特判“旧表”会形成 Foundation identity 之外的第二套兼容规则 | type/name/tbl_name/sql canonical query/framing；任意 extra/missing/DDL drift 自然 mismatch |
 | UPG-056 | Media 所有 database/tree/output 路径必须绝对且 output/tree 分离 | `src/current.rs::validate_options` | 保障 | 中 | cwd 变化或树内输出可造成递归复制、自包含和误删 | relative、output under tree、tree under output 拒绝；Media 不接受 key/config 参数 |
 | UPG-057 | Media backup 先对 DB/tree 取得 exclusive lock，再验证源与产品业务不变量 | `src/current.rs::backup_current`、`ProductLocks` | 保障 | 高 | 复制前就可能接受混合产品或正在变化的 generation | 两个 sibling lock 均为 non-blocking exclusive；exact identity；复制完成后 destination inventory 与随后 source inventory 相等，不宣称有两次 source 快照；当前无 external key |
@@ -107,7 +107,7 @@ React/Vite 或其他前端；仓库当前无需运行时配置或服务部署，
 | UPG-081 | key ID 1～64 ASCII alnum/`-_`，key file base64 解码为精确 32 bytes | `validate_key_id`、`credentials_key_from_file` | 保障 | 中 | 模糊 key identity 或错误长度进入 AES-256-GCM | empty/65/非法字符/base64/31/33 bytes 负例；文件最大 4096 bytes |
 | UPG-082 | key 文件必须私有、单硬链接、普通文件，读取前中后复核 identity | `credentials_key_from_file` | 保障 | 高 | 攻击者替换/共享 Secret 或用特殊文件阻塞 | group/other bits、symlink/hardlink、dev/ino/size/mtime race；raw key 不输出 |
 | UPG-083 | Sunshine manifest 只保存 key ID、key SHA、AES-256-GCM、envelope v1 | `sunshine_external_requirement` | 保障 | 中 | 把 raw key 放入同一备份会失去信任域分离 | manifest/JSON/debug/log 无 raw bytes；错误 ID/hash/algorithm/version 拒绝 |
-| UPG-084 | Sunshine 全量扫描并认证所有非 NULL host/operation 密文 | `verify_sunshine_encrypted_values` | 保障 | 高 | 只比 key SHA 无法证明 key 能解密全部当前状态；按 operation 完成状态漏扫会留下未认证行 | hosts.secret 与 operations.request_ciphertext 的所有非 NULL 行；correct/wrong key、tamper、malformed envelope/JSON；当前 12-byte nonce + empty AAD |
+| UPG-084 | Sunshine 全量扫描并认证所有非 NULL host/operation 密文 | `verify_sunshine_encrypted_values` | 保障 | 高 | 只比 key SHA 无法证明 key 能解密全部当前状态；按 operation 完成状态漏扫会留下未认证行 | hosts.secret 与 operations.request_ciphertext 的所有非 NULL 行；correct/wrong key、tamper、malformed envelope/JSON；12-byte nonce + 产品/对象/action/字段长度分帧 AAD |
 | UPG-085 | verify 命令严格只读且不修复 manifest、DB 或 tree | verify functions、SecureDirectory | 核心 | 中 | 自动 repair 会销毁事故证据或掩盖来源问题 | 输入 mode/hash/mtime 可比对；失败无持久 mutation；错误信息不泄露 key |
 | UPG-086 | backup/restore 与 recover 是不同授权动作 | CLI enums、support matrix | 保障 | 中 | 一个通用“自动继续”命令会在证据不足时替操作者决策 | restore requires replace flag；recover requires explicit commit/rollback；unsupported action 拒绝 |
 | UPG-087 | 所有具体历史 `upgrade_edges` 当前为空 | `src/support.rs`、CLI、无 adapters/SQL | 核心 | 高 | 若文档或 release 暗示 edge，用户会把开发数据交给不存在的路径 | 每产品 empty；help 无 upgrade；source search 仅允许类型/文档/未来准入描述 |
@@ -141,9 +141,9 @@ Foundation。
 |---|---|---|---|---|
 | Media Backup `0.2.0` | DB + data tree 组合状态 | commit/rollback | 无 | 无 |
 | Host Monitoring `0.7.0` | SQLite | commit/rollback | 无 | 无 |
-| Sunshine Manager `0.7.0` | SQLite + 密文认证 | restore 中断恢复当前不对外声明 | 无 | credentials key ID + 32-byte key |
-| Sentinel Monitor | 未实现 | 未实现 | 无 | 未来必须组合 DB/config/contract/recordings/key |
-| Dufs RAM | 未实现 | 未实现 | 无 | 未来必须组合 DB/config/shared tree/owner domain |
+| Sunshine Manager `0.8.0` | SQLite + 密文认证 | restore 中断恢复当前不对外声明 | 无 | credentials key ID + 32-byte key |
+| Sentinel Monitor `0.2.0` | DB + recordings + 三个配置 + 密文认证 | `recover-current` commit/rollback | 无 | credentials key ID + 32-byte key |
+| Dufs RAM `0.50.1` | DB + shared root + `dufs.yaml` | `recover-current` commit/rollback | 无 | 无 |
 | Sarmg Foundation | 无运行时状态 | 不适用 | 无 | 不适用 |
 
 机器调用必须以 `sarmg-upgrade support --json` 为准。表格不能让未实现命令变成支持能力。

@@ -124,7 +124,7 @@ backup；修复空间/挂载/key 等环境问题；用
 | Media restore | `recover-media-restore --expect-version 0.2.0 --input BACKUP --database DB --data-dir TREE --recovery RECOVERY --action commit\|rollback` | `commit` / `rollback` | 六项参数都必填且路径必须与 journal 精确一致；不接受 Sentinel/Dufs，不拆分 DB/tree |
 | Host SQLite restore | `recover-sqlite --product host-monitoring --expect-version 0.7.0` | `commit` / `rollback` | 不接受其他 product/version |
 | Sunshine SQLite restore | 无 | 事件保全与人工升级 | 不得假装 Host、不得缺 key 续接 |
-| Sentinel/Dufs | 无 adapter | 不适用 | 不得从 catalog 推导 recover |
+| Sentinel/Dufs composite restore | `recover-current --product PRODUCT --expect-version VERSION --input BACKUP --database DB --data-dir TREE --recovery RECOVERY --action commit\|rollback` | `commit` / `rollback` | product/version/path/key 必须与 journal 精确一致 |
 | historical upgrade | 无 edge/命令 | 不适用 | 不得把 restore recovery 称为 upgrade recovery |
 
 ## 5.11 常见状态判断错误

@@ -16,14 +16,15 @@ sarmg-upgrade 0.2.0
 │  └─ recover-media-restore
 ├─ 当前 SQLite-only 状态
 │  ├─ Host Monitoring 0.7.0：backup / verify / restore / recover
-│  └─ Sunshine Manager 0.7.0：keyed backup / verify / restore
-├─ Foundation 共享合同：两个 crate 均为 =0.3.0
-│  └─ immutable Git rev：1fe326081cfd896f05ff502e80f99504797c14c6
+│  └─ Sunshine Manager 0.8.0：keyed backup / verify / restore
+├─ 当前组合状态
+│  ├─ Sentinel Monitor 0.2.0：DB / recordings / 三个配置 / key
+│  └─ Dufs RAM 0.50.1：DB / shared root / dufs.yaml
+├─ Foundation 共享合同：两个 crate 均为 =0.4.0
+│  └─ immutable Git rev：0e1be10273fd6abf72e0d0eeb24cbb1120572486
 │  ├─ sarmg-contracts：manifest / resource / external requirement / SchemaIdentity
 │  └─ sarmg-schema-identity：metadata row/column / canonical query / fingerprint
 ├─ 暂未实现
-│  ├─ Sentinel 当前组合备份/恢复
-│  ├─ Dufs 当前组合备份/恢复
 │  └─ 所有历史升级 edge
 └─ 交付
    ├─ tests + clippy + supply-chain checks
@@ -59,7 +60,7 @@ sarmg-upgrade 产品命令
 
 边界是刻意的：Foundation 不链接 rusqlite、不打开产品路径、不声明 Host/Media/Sunshine 的支持版本；本仓库
 不复制 schema framing、metadata 五列模型、manifest leaf type 或旧 wire parser。开发、CI 与正式发行均只允许
-同时具有 `=0.3.0` 和不可变 Git rev `1fe326081cfd896f05ff502e80f99504797c14c6` 的 Foundation 依赖，
+同时具有 `=0.4.0` 和不可变 Git rev `0e1be10273fd6abf72e0d0eeb24cbb1120572486` 的 Foundation 依赖，
 并把来源与 lockfile 纳入审核；不得用 workspace sibling、Cargo path dependency、可变 branch 或本地副本联调。
 
 ## 3. 当前备份流程
@@ -160,13 +161,15 @@ clean checkout + annotated exact tag
 
 | CLI | 选择条件 | 核心实现 | 成功证明 | 明确不证明 |
 |---|---|---|---|---|
-| `support [--json]` | 无产品输入 | `support_matrix()` | 此 binary 编译进的 current capability 与正式 target | catalog 中的未来资源已经实现 |
+| `support [--json]` | 无产品输入 | `support_matrix()` | 此 binary 编译进的 current capability 与正式 target | catalog 中的资源描述自动等于可执行能力 |
 | `catalog [--json]` | 无产品输入 | `Product::contract()` | 六个产品的持久资源边界 | 某资源已有 backup/restore adapter |
 | `inspect-manifest PATH` | Foundation SQLite manifest | `BackupManifest::read` | JSON、共享字段、产品策略、相对路径、排序可解析 | Media manifest、资源字节、hash、Schema、key；此入口当前不单独限制读取字节数 |
 | `backup-media` | Media 0.2.0 | `backup_current` | DB+tree 同一 current generation 已不可变发布并复验 | 任意其他 Media 版本或历史转换 |
 | `verify-media-backup` | Media current composite backup | `verify_current_backup` | DB identity、tree inventory、manifest 全部相符 | 源生产路径此刻仍与备份相同 |
 | `restore-media` | 全新目标或显式 replace | `restore_current` | current DB+tree 已成组安装并验证 | 服务已停止、业务 smoke 已通过 |
 | `recover-media-restore` | 显式 `--expect-version/--input/--database/--data-dir/--recovery/--action` 六项 | `recover_current` | 显式 current 上下文与严格 journal/磁盘证据一致后，选择的 commit/rollback 完成 | 省略 source/target/recovery/action、随意更换 binary/路径或编辑 journal |
+| `backup-current` / `verify-current` | Media/Sentinel/Dufs current | `backup_current` / `verify_current_backup` | DB、tree、精确配置集与 key 要求同代验证 | generic SQLite 足以表达组合状态 |
+| `restore-current` / `recover-current` | Sentinel/Dufs 或 generic Media current | `restore_current` / `recover_current` | DB/tree/config 按 durable journal 一起安装或回滚 | 服务已停止或产品 smoke 已通过 |
 | `backup-sqlite` | 仅 Host/Sunshine current | `create_sqlite_backup*` | online snapshot、identity、hash；Sunshine 还证明密文可认证 | Media/Sentinel/Dufs 已完整备份 |
 | `verify-sqlite` | 仅 Host/Sunshine current backup | `verify_sqlite_backup*` | exact 两文件目录、manifest、DB、key 合同 | 目标路径可安全 replace |
 | `restore-sqlite` | Host/Sunshine exact expect-version | `restore_sqlite_backup*` | 当前 DB 已按 durable journal 安装并验证 | Sunshine 中断 recovery 已受支持 |
@@ -198,7 +201,9 @@ CLI 不读取运行时配置文件，也没有环境变量 fallback。仓库因�
 |---|---:|---:|---|
 | Media Backup | `0.2.0` | 1 | `2563e6afc3fff272d02b7a5615272cc773862243bfd15aec51655abf1d9c6b1c` |
 | Host Monitoring | `0.7.0` | 1 | `12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05` |
-| Sunshine Manager | `0.7.0` | 1 | `a717bcd5a591e7f7cc6da5826af88ad0deab2fdc339ce4649ad84f21ea879dbc` |
+| Sunshine Manager | `0.8.0` | 2 | `c9dedb33dd7a5ad613e762eb135a7aa5184ce1df52166459bee7b3485b4b3be3` |
+| Sentinel Monitor | `0.2.0` | 1 | `f547ddc817d830d23b5305bb1f88b29898d6531568edd6eb194c2b629eb560c0` |
+| Dufs RAM | `0.50.1` | 1 | `3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423` |
 
 任何额外表/index/trigger、缺失对象或 DDL 变化都通过同一 fingerprint 自然拒绝。代码没有、也不应新增
 针对 `_sqlx_migrations` 或其他“旧表名”的特殊分支；否则 current identity 之外又会出现隐式兼容规则。

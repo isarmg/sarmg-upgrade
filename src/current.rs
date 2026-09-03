@@ -10,7 +10,13 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use aes_gcm::{
+    Aes256Gcm, Nonce,
+    aead::{Aead, KeyInit, Payload},
+};
 use anyhow::{Context, ensure};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use hkdf::Hkdf;
 use rusqlite::{Connection, OpenFlags, backup::Backup};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -22,7 +28,7 @@ const MANIFEST_FILE: &str = "manifest.json";
 const DATABASE_FILE: &str = "database.sqlite3";
 const TREE_DIRECTORY: &str = "tree";
 const CURRENT_MANIFEST_VERSION: u32 = 3;
-const CURRENT_RESTORE_JOURNAL_VERSION: u32 = 2;
+const CURRENT_RESTORE_JOURNAL_VERSION: u32 = 3;
 const MAX_MANIFEST_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_CURRENT_JOURNAL_BYTES: u64 = 1024 * 1024;
 const MAX_TREE_ENTRIES: u64 = 2_000_000;
@@ -32,6 +38,19 @@ pub(crate) const MEDIA_CURRENT_APPLICATION_VERSION: &str = "0.2.0";
 const MEDIA_SCHEMA_REVISION: u64 = 1;
 const MEDIA_SCHEMA_SHA256: &str =
     "2563e6afc3fff272d02b7a5615272cc773862243bfd15aec51655abf1d9c6b1c";
+pub(crate) const SENTINEL_CURRENT_APPLICATION_VERSION: &str = "0.2.0";
+const SENTINEL_SCHEMA_REVISION: u64 = 1;
+const SENTINEL_SCHEMA_SHA256: &str =
+    "f547ddc817d830d23b5305bb1f88b29898d6531568edd6eb194c2b629eb560c0";
+const SENTINEL_KEY_ID: &str = "sentinel-credentials-0.2.0-key-1";
+const SENTINEL_KEY_DERIVATION_SALT: &[u8] = b"sentinel-monitor/0.2.0/credential-envelope/key/v1";
+const SENTINEL_KEY_DERIVATION_INFO: &[u8] = b"sentinel-credential-envelope/aes-256-gcm";
+const SENTINEL_AAD_DOMAIN: &str = "sentinel-monitor/0.2.0/credential-envelope/aad/v1";
+const SENTINEL_MAX_ENVELOPE_BYTES: usize = 64 * 1024;
+const SENTINEL_MAX_PLAINTEXT_BYTES: usize = 16 * 1024;
+pub(crate) const DUFS_CURRENT_APPLICATION_VERSION: &str = "0.50.1";
+const DUFS_SCHEMA_REVISION: u64 = 1;
+const DUFS_SCHEMA_SHA256: &str = "3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423";
 
 #[derive(Clone)]
 pub struct CompositeCurrentOptions {
@@ -217,8 +236,32 @@ struct RestoreJournal {
     original_database: Option<CurrentFile>,
     original_tree: Option<TreeArchive>,
     configuration: Vec<CurrentFile>,
+    configuration_targets: Vec<RestoreConfiguration>,
     external_requirements: Vec<ExternalRequirement>,
     phase: RestorePhase,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RestoreConfiguration {
+    name: String,
+    target: PathBuf,
+    target_path_identity_sha256: String,
+    stage: PathBuf,
+    original: PathBuf,
+    incoming: CurrentFile,
+    original_file: Option<CurrentFile>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SentinelCredentialEnvelope {
+    product: String,
+    application_version: String,
+    envelope_revision: u32,
+    key_id: String,
+    nonce: String,
+    ciphertext: String,
 }
 
 pub fn backup_current(options: &CompositeCurrentOptions) -> anyhow::Result<CurrentStateResult> {
@@ -327,6 +370,22 @@ pub fn verify_current_backup(
         );
     }
     ensure!(
+        options.configuration.len() == manifest.configuration.len(),
+        "current adapter configuration resource count differs"
+    );
+    for configured in &options.configuration {
+        let expected = manifest
+            .configuration
+            .iter()
+            .find(|entry| entry.path == configured.name)
+            .context("current adapter configuration name differs")?;
+        ensure!(
+            current_file(&configured.name, &configured.path)? == *expected,
+            "current adapter configuration content differs for {}",
+            configured.name
+        );
+    }
+    ensure!(
         manifest.external_requirements == external_requirements(options)?,
         "backup external requirements do not match the supplied key"
     );
@@ -348,13 +407,21 @@ pub fn verify_current_backup(
 }
 
 pub fn restore_current(options: &CurrentRestoreOptions) -> anyhow::Result<CurrentStateResult> {
+    let source_configuration = options
+        .configuration
+        .iter()
+        .map(|file| NamedFile {
+            name: file.name.clone(),
+            path: options.input.join(&file.name),
+        })
+        .collect();
     let verify = CompositeCurrentOptions {
         product: options.product,
-        database: options.database.clone(),
-        tree: options.tree.clone(),
+        database: options.input.join(DATABASE_FILE),
+        tree: options.input.join(TREE_DIRECTORY),
         output: options.input.clone(),
         runtime_directory: options.runtime_directory.clone(),
-        configuration: options.configuration.clone(),
+        configuration: source_configuration,
         credentials_key_id: options.credentials_key_id.clone(),
         credentials_key: options.credentials_key,
     };
@@ -363,6 +430,22 @@ pub fn restore_current(options: &CurrentRestoreOptions) -> anyhow::Result<Curren
     let database = canonical_target_path(&options.database)?;
     let tree = canonical_target_path(&options.tree)?;
     ensure_source_and_targets_are_disjoint(&source_backup, &database, &tree)?;
+    let configuration_targets = options
+        .configuration
+        .iter()
+        .map(|file| {
+            Ok(NamedFile {
+                name: file.name.clone(),
+                path: canonical_target_path(&file.path)?,
+            })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    ensure_configuration_targets_are_disjoint(
+        &source_backup,
+        &database,
+        &tree,
+        &configuration_targets,
+    )?;
     let _locks = ProductLocks::acquire(
         options.product,
         &database,
@@ -371,13 +454,23 @@ pub fn restore_current(options: &CurrentRestoreOptions) -> anyhow::Result<Curren
     )?;
     let database_exists = path_exists(&database)?;
     let tree_exists = path_exists(&tree)?;
+    let configuration_exists = configuration_targets
+        .iter()
+        .map(|file| path_exists(&file.path))
+        .collect::<anyhow::Result<Vec<_>>>()?;
     ensure!(
-        options.replace_existing || (!database_exists && !tree_exists),
+        options.replace_existing
+            || (!database_exists
+                && !tree_exists
+                && configuration_exists.iter().all(|exists| !exists)),
         "restore targets already exist; pass --replace-existing"
     );
     ensure!(
-        database_exists == tree_exists,
-        "restore target contains a mixed database/data-tree generation"
+        database_exists == tree_exists
+            && configuration_exists
+                .iter()
+                .all(|exists| *exists == database_exists),
+        "restore target contains a mixed composite-state generation"
     );
     let (original_database, original_tree) = if database_exists {
         verify_database(options.product, &database)
@@ -402,10 +495,6 @@ pub fn restore_current(options: &CurrentRestoreOptions) -> anyhow::Result<Curren
     create_private_directory(&tree_stage)?;
     copy_strict_tree(&source_backup.join(TREE_DIRECTORY), &tree_stage, 0)?;
     let manifest = read_manifest(&source_backup)?;
-    ensure!(
-        manifest.configuration.is_empty(),
-        "Media restore manifest configuration must be exactly empty"
-    );
     verify_incoming_generation(
         &manifest.database,
         &manifest.tree,
@@ -414,6 +503,34 @@ pub fn restore_current(options: &CurrentRestoreOptions) -> anyhow::Result<Curren
     )?;
     verify_database(options.product, &database_stage)?;
     verify_product_state(options.product, &database_stage, &tree_stage)?;
+    let mut restore_configuration = Vec::new();
+    for (target, exists) in configuration_targets.iter().zip(configuration_exists) {
+        let incoming = manifest
+            .configuration
+            .iter()
+            .find(|file| file.path == target.name)
+            .context("restore configuration name differs from the manifest")?
+            .clone();
+        let stage = sibling(&target.path, &format!("incoming-{nonce}"))?;
+        let original = sibling(&target.path, &format!("original-{nonce}"))?;
+        copy_regular(&source_backup.join(&target.name), &stage)?;
+        ensure!(
+            current_file(&target.name, &stage)? == incoming,
+            "staged restore configuration differs from the manifest"
+        );
+        restore_configuration.push(RestoreConfiguration {
+            name: target.name.clone(),
+            target: target.path.clone(),
+            target_path_identity_sha256: target_path_identity_sha256(&target.path)?,
+            stage,
+            original,
+            incoming,
+            original_file: exists
+                .then(|| current_file(&target.name, &target.path))
+                .transpose()?,
+        });
+    }
+    restore_configuration.sort_by(|left, right| left.name.cmp(&right.name));
     create_private_directory(&recovery)?;
     sync_parent(&recovery)?;
     let recovery = canonical_existing_directory(&recovery, "restore recovery directory")?;
@@ -450,26 +567,13 @@ pub fn restore_current(options: &CurrentRestoreOptions) -> anyhow::Result<Curren
         original_database,
         original_tree,
         configuration: manifest.configuration.clone(),
+        configuration_targets: restore_configuration,
         external_requirements: manifest.external_requirements.clone(),
         phase: RestorePhase::Prepared,
     };
     validate_restore_journal(&journal, &recovery)?;
     write_journal(&recovery, &journal)?;
-    if database_exists {
-        fs::rename(&journal.database, &journal.database_original)?;
-        fs::rename(&journal.tree, &journal.tree_original)?;
-        sync_parent(&journal.database)?;
-        sync_parent(&journal.tree)?;
-        journal.phase = RestorePhase::OriginalsPreserved;
-        replace_journal(&recovery, &journal)?;
-    }
-    fs::rename(&journal.tree_stage, &journal.tree)?;
-    fs::rename(&journal.database_stage, &journal.database)?;
-    sync_parent(&journal.database)?;
-    sync_parent(&journal.tree)?;
-    journal.phase = RestorePhase::Installed;
-    replace_journal(&recovery, &journal)?;
-    verify_installed_generation(&journal)?;
+    resume_current_commit(&recovery, &mut journal)?;
     verify_external_key(
         options.product,
         &journal.database,
@@ -478,8 +582,6 @@ pub fn restore_current(options: &CurrentRestoreOptions) -> anyhow::Result<Curren
             .as_deref()
             .zip(options.credentials_key.as_ref()),
     )?;
-    journal.phase = RestorePhase::Verified;
-    replace_journal(&recovery, &journal)?;
     cleanup_recovery_directory(&recovery, &journal)?;
     Ok(CurrentStateResult {
         product: options.product,
@@ -494,10 +596,6 @@ pub fn recover_current(options: &CurrentRecoveryOptions) -> anyhow::Result<Curre
         options.expected_application_version == version,
         "--expect-version is not the official current version for {}",
         options.product
-    );
-    ensure!(
-        options.credentials_key_id.is_none() && options.credentials_key.is_none(),
-        "Media current recovery does not accept an external credentials key"
     );
     let source_backup = canonical_existing_directory(&options.input, "backup source")?;
     let database = canonical_target_path(&options.database)?;
@@ -524,6 +622,16 @@ pub fn recover_current(options: &CurrentRecoveryOptions) -> anyhow::Result<Curre
         "recovery database target mismatch"
     );
     ensure!(journal.tree == tree, "recovery data-tree target mismatch");
+    ensure!(
+        journal.external_requirements
+            == external_requirements_for(
+                options
+                    .credentials_key_id
+                    .as_deref()
+                    .zip(options.credentials_key.as_ref()),
+            ),
+        "recovery external credentials key does not match the journal"
+    );
     let _locks = ProductLocks::acquire(
         options.product,
         &database,
@@ -634,10 +742,6 @@ fn validate_restore_journal(journal: &RestoreJournal, recovery: &Path) -> anyhow
         journal.tool_version == env!("CARGO_PKG_VERSION"),
         "current restore journal tool version is not exact"
     );
-    ensure!(
-        journal.product == Product::MediaBackup,
-        "current restore journal product is not Media Backup"
-    );
     let (version, revision, schema_sha256) = product_contract(journal.product)?;
     ensure!(
         journal.application_version == version,
@@ -679,14 +783,34 @@ fn validate_restore_journal(journal: &RestoreJournal, recovery: &Path) -> anyhow
     ] {
         validate_sha256(digest)?;
     }
+    validate_product_resources(
+        journal.product,
+        &journal.configuration,
+        &journal.external_requirements,
+    )?;
     ensure!(
-        journal.configuration.is_empty(),
-        "Media current restore journal configuration must be exactly empty"
+        journal.configuration_targets.len() == journal.configuration.len(),
+        "current restore journal configuration target count is not exact"
     );
-    ensure!(
-        journal.external_requirements.is_empty(),
-        "Media current restore journal external requirements must be exactly empty"
-    );
+    for (resource, target) in journal
+        .configuration
+        .iter()
+        .zip(&journal.configuration_targets)
+    {
+        ensure!(
+            target.name == resource.path && target.incoming == *resource,
+            "current restore journal configuration mapping is not exact"
+        );
+        validate_name(&target.name)?;
+        validate_sha256(&target.target_path_identity_sha256)?;
+        if let Some(original) = &target.original_file {
+            ensure!(
+                original.path == target.name,
+                "current restore journal original configuration name is not exact"
+            );
+            validate_sha256(&original.sha256)?;
+        }
+    }
     validate_current_file(&journal.incoming_database, DATABASE_FILE)?;
     validate_tree_archive_contract(&journal.incoming_tree)?;
     match (&journal.original_database, &journal.original_tree) {
@@ -760,17 +884,45 @@ fn validate_restore_journal(journal: &RestoreJournal, recovery: &Path) -> anyhow
             && journal.tree_original == sibling(&tree, &format!("original-{nonce}"))?,
         "current restore journal stage/original paths are not exact target siblings"
     );
+    let mut configuration_paths = BTreeSet::new();
+    for target in &journal.configuration_targets {
+        let canonical = canonical_target_path(&target.target)?;
+        ensure!(
+            canonical == target.target
+                && target_path_identity_sha256(&target.target)?
+                    == target.target_path_identity_sha256,
+            "current restore journal configuration target identity mismatch"
+        );
+        ensure!(
+            target.stage == sibling(&target.target, &format!("incoming-{nonce}"))?
+                && target.original == sibling(&target.target, &format!("original-{nonce}"))?,
+            "current restore journal configuration stage/original paths are not exact"
+        );
+        ensure!(
+            configuration_paths.insert(target.target.clone()),
+            "current restore journal configuration targets are duplicated"
+        );
+    }
+    let configuration = journal
+        .configuration_targets
+        .iter()
+        .map(|target| NamedFile {
+            name: target.name.clone(),
+            path: target.target.clone(),
+        })
+        .collect::<Vec<_>>();
+    ensure_configuration_targets_are_disjoint(&source_backup, &database, &tree, &configuration)?;
     Ok(())
 }
 
 fn verify_recovery_source(journal: &RestoreJournal) -> anyhow::Result<()> {
-    verify_current_backup_root(&journal.source_backup)?;
     let (manifest_bytes, manifest_sha256) = hash_file(&journal.source_backup.join(MANIFEST_FILE))?;
     ensure!(
         manifest_bytes == journal.source_manifest_bytes
             && manifest_sha256 == journal.source_manifest_sha256,
         "current restore source manifest content hash mismatch"
     );
+    verify_current_backup_root(&journal.source_backup)?;
     let manifest = read_manifest(&journal.source_backup)?;
     validate_manifest(&manifest)?;
     ensure!(
@@ -803,7 +955,14 @@ fn verify_recovery_source(journal: &RestoreJournal) -> anyhow::Result<()> {
         journal.product,
         &journal.source_backup.join(DATABASE_FILE),
         &journal.source_backup.join(TREE_DIRECTORY),
-    )
+    )?;
+    for resource in &journal.configuration {
+        ensure!(
+            current_file(&resource.path, &journal.source_backup.join(&resource.path))? == *resource,
+            "current restore source configuration content mismatch"
+        );
+    }
+    Ok(())
 }
 
 fn verify_recovery_evidence(
@@ -865,10 +1024,51 @@ fn verify_recovery_evidence(
         (None, Some(_)) => anyhow::bail!("unexpected preserved current data tree"),
         _ => {}
     }
+    let mut configuration_targets_are_incoming = true;
+    let mut configuration_stages_are_absent = true;
+    let mut configuration_originals_are_available = true;
+    let mut configuration_originals_are_preserved = true;
+    for configuration in &journal.configuration_targets {
+        let stage = observed_current_file(&configuration.stage, &configuration.name)?;
+        let target = observed_current_file(&configuration.target, &configuration.name)?;
+        let original = observed_current_file(&configuration.original, &configuration.name)?;
+        ensure_optional_exact(
+            stage.as_ref(),
+            &configuration.incoming,
+            "staged current configuration",
+        )?;
+        if let Some(observed) = target.as_ref() {
+            ensure!(
+                observed == &configuration.incoming
+                    || configuration.original_file.as_ref() == Some(observed),
+                "current configuration target content does not match the journal"
+            );
+        }
+        match (&configuration.original_file, &original) {
+            (Some(expected), Some(observed)) => ensure!(
+                observed == expected,
+                "preserved current configuration content does not match the journal"
+            ),
+            (None, Some(_)) => anyhow::bail!("unexpected preserved current configuration"),
+            _ => {}
+        }
+        configuration_targets_are_incoming &= target.as_ref() == Some(&configuration.incoming);
+        configuration_stages_are_absent &= stage.is_none();
+        configuration_originals_are_available &=
+            configuration.original_file.as_ref().is_none_or(|expected| {
+                target.as_ref() == Some(expected) || original.as_ref() == Some(expected)
+            });
+        configuration_originals_are_preserved &= configuration
+            .original_file
+            .as_ref()
+            .is_none_or(|expected| original.as_ref() == Some(expected));
+    }
 
     let targets_are_incoming = database_target.as_ref() == Some(&journal.incoming_database)
-        && tree_target.as_ref() == Some(&journal.incoming_tree);
-    let stages_are_absent = database_stage.is_none() && tree_stage.is_none();
+        && tree_target.as_ref() == Some(&journal.incoming_tree)
+        && configuration_targets_are_incoming;
+    let stages_are_absent =
+        database_stage.is_none() && tree_stage.is_none() && configuration_stages_are_absent;
     let has_original = journal.original_database.is_some();
     let original_database_available = journal.original_database.as_ref().is_some_and(|expected| {
         database_target.as_ref() == Some(expected) || database_original.as_ref() == Some(expected)
@@ -878,7 +1078,9 @@ fn verify_recovery_evidence(
     });
     if action == CurrentRecoveryAction::Rollback && has_original {
         ensure!(
-            original_database_available && original_tree_available,
+            original_database_available
+                && original_tree_available
+                && configuration_originals_are_available,
             "current restore journal has no exact original generation to roll back"
         );
     }
@@ -887,11 +1089,19 @@ fn verify_recovery_evidence(
             if has_original {
                 ensure!(
                     database_stage.as_ref() == Some(&journal.incoming_database)
-                        && tree_stage.as_ref() == Some(&journal.incoming_tree),
+                        && tree_stage.as_ref() == Some(&journal.incoming_tree)
+                        && journal.configuration_targets.iter().all(|configuration| {
+                            observed_current_file(&configuration.stage, &configuration.name)
+                                .is_ok_and(|observed| {
+                                    observed.as_ref() == Some(&configuration.incoming)
+                                })
+                        }),
                     "prepared replacement journal lost staged incoming content"
                 );
                 ensure!(
-                    original_database_available && original_tree_available,
+                    original_database_available
+                        && original_tree_available
+                        && configuration_originals_are_available,
                     "prepared replacement journal lost original content"
                 );
             } else {
@@ -905,6 +1115,17 @@ fn verify_recovery_evidence(
                         || tree_target.as_ref() == Some(&journal.incoming_tree),
                     "prepared journal has no exact incoming data tree"
                 );
+                ensure!(
+                    journal.configuration_targets.iter().all(|configuration| {
+                        observed_current_file(&configuration.stage, &configuration.name)
+                            .is_ok_and(|stage| stage.as_ref() == Some(&configuration.incoming))
+                            || observed_current_file(&configuration.target, &configuration.name)
+                                .is_ok_and(|target| {
+                                    target.as_ref() == Some(&configuration.incoming)
+                                })
+                    }),
+                    "prepared journal has no exact incoming configuration"
+                );
             }
         }
         RestorePhase::OriginalsPreserved => {
@@ -913,7 +1134,9 @@ fn verify_recovery_evidence(
                 "originals-preserved journal has no original generation"
             );
             ensure!(
-                database_original.is_some() && tree_original.is_some(),
+                database_original.is_some()
+                    && tree_original.is_some()
+                    && configuration_originals_are_preserved,
                 "originals-preserved journal lost original content"
             );
             ensure!(
@@ -926,11 +1149,23 @@ fn verify_recovery_evidence(
                     || tree_target.as_ref() == Some(&journal.incoming_tree),
                 "originals-preserved journal has no exact incoming data tree"
             );
+            ensure!(
+                journal.configuration_targets.iter().all(|configuration| {
+                    observed_current_file(&configuration.stage, &configuration.name)
+                        .is_ok_and(|stage| stage.as_ref() == Some(&configuration.incoming))
+                        || observed_current_file(&configuration.target, &configuration.name)
+                            .is_ok_and(|target| target.as_ref() == Some(&configuration.incoming))
+                }),
+                "originals-preserved journal has no exact incoming configuration"
+            );
         }
         RestorePhase::Installed => ensure!(
             targets_are_incoming
                 && stages_are_absent
-                && (!has_original || (database_original.is_some() && tree_original.is_some())),
+                && (!has_original
+                    || (database_original.is_some()
+                        && tree_original.is_some()
+                        && configuration_originals_are_preserved)),
             "installed journal does not contain the exact installed generation"
         ),
         RestorePhase::Verified => ensure!(
@@ -949,18 +1184,33 @@ fn verify_recovery_evidence(
                         || tree_original.as_ref() == journal.original_tree.as_ref(),
                     "rollback journal has no exact original data tree"
                 );
+                ensure!(
+                    configuration_originals_are_available,
+                    "rollback journal has no exact original configuration"
+                );
             }
         }
         RestorePhase::RollbackVerified => {
             if has_original {
                 ensure!(
                     database_target.as_ref() == journal.original_database.as_ref()
-                        && tree_target.as_ref() == journal.original_tree.as_ref(),
+                        && tree_target.as_ref() == journal.original_tree.as_ref()
+                        && journal.configuration_targets.iter().all(|configuration| {
+                            observed_current_file(&configuration.target, &configuration.name)
+                                .is_ok_and(|target| {
+                                    target.as_ref() == configuration.original_file.as_ref()
+                                })
+                        }),
                     "rollback-verified journal does not contain the exact original generation"
                 );
             } else {
                 ensure!(
-                    database_target.is_none() && tree_target.is_none(),
+                    database_target.is_none()
+                        && tree_target.is_none()
+                        && journal.configuration_targets.iter().all(|configuration| {
+                            observed_current_file(&configuration.target, &configuration.name)
+                                .is_ok_and(|target| target.is_none())
+                        }),
                     "rollback-verified journal unexpectedly retains installed targets"
                 );
             }
@@ -975,6 +1225,7 @@ fn resume_current_commit(recovery: &Path, journal: &mut RestoreJournal) -> anyho
     }
     if journal.phase != RestorePhase::Installed {
         preserve_original_file_for_commit(
+            DATABASE_FILE,
             &journal.database,
             &journal.database_stage,
             &journal.database_original,
@@ -988,14 +1239,30 @@ fn resume_current_commit(recovery: &Path, journal: &mut RestoreJournal) -> anyho
             journal.original_tree.as_ref(),
             &journal.incoming_tree,
         )?;
+        for configuration in &journal.configuration_targets {
+            preserve_original_file_for_commit(
+                &configuration.name,
+                &configuration.target,
+                &configuration.stage,
+                &configuration.original,
+                configuration.original_file.as_ref(),
+                &configuration.incoming,
+            )?;
+        }
         if journal.original_database.is_some() {
             journal.phase = RestorePhase::OriginalsPreserved;
             replace_journal(recovery, journal)?;
         }
         install_incoming_tree(journal)?;
         install_incoming_file(journal)?;
+        for configuration in &journal.configuration_targets {
+            install_incoming_configuration(configuration)?;
+        }
         sync_parent(&journal.database)?;
         sync_parent(&journal.tree)?;
+        for configuration in &journal.configuration_targets {
+            sync_parent(&configuration.target)?;
+        }
         journal.phase = RestorePhase::Installed;
         replace_journal(recovery, journal)?;
     }
@@ -1012,6 +1279,9 @@ fn resume_current_rollback(recovery: &Path, journal: &mut RestoreJournal) -> any
         }
         restore_original_file(journal)?;
         restore_original_tree(journal)?;
+        for configuration in &journal.configuration_targets {
+            restore_original_configuration(configuration)?;
+        }
         match (&journal.original_database, &journal.original_tree) {
             (Some(database), Some(tree)) => {
                 ensure!(
@@ -1025,9 +1295,15 @@ fn resume_current_rollback(recovery: &Path, journal: &mut RestoreJournal) -> any
                 );
                 verify_database(journal.product, &journal.database)?;
                 verify_product_state(journal.product, &journal.database, &journal.tree)?;
+                verify_installed_configuration(journal, true)?;
             }
             (None, None) => ensure!(
-                !path_exists(&journal.database)? && !path_exists(&journal.tree)?,
+                !path_exists(&journal.database)?
+                    && !path_exists(&journal.tree)?
+                    && journal
+                        .configuration_targets
+                        .iter()
+                        .all(|configuration| !path_exists(&configuration.target).unwrap_or(false)),
                 "rollback of an initially empty target left installed content"
             ),
             _ => unreachable!(),
@@ -1039,6 +1315,7 @@ fn resume_current_rollback(recovery: &Path, journal: &mut RestoreJournal) -> any
 }
 
 fn preserve_original_file_for_commit(
+    name: &str,
     target: &Path,
     stage: &Path,
     original: &Path,
@@ -1050,18 +1327,18 @@ fn preserve_original_file_for_commit(
     };
     if path_exists(original)? {
         ensure!(
-            observed_current_file(original, DATABASE_FILE)?.as_ref() == Some(expected_original),
-            "preserved current database content mismatch"
+            observed_current_file(original, name)?.as_ref() == Some(expected_original),
+            "preserved current file content mismatch"
         );
         return Ok(());
     }
-    if let Some(observed) = observed_current_file(target, DATABASE_FILE)? {
+    if let Some(observed) = observed_current_file(target, name)? {
         if &observed == incoming && !path_exists(stage)? {
             return Ok(());
         }
         ensure!(
             &observed == expected_original,
-            "current database target is neither the incoming nor original generation"
+            "current file target is neither the incoming nor original generation"
         );
         fs::rename(target, original)?;
         sync_parent(target)?;
@@ -1138,6 +1415,27 @@ fn install_incoming_tree(journal: &RestoreJournal) -> anyhow::Result<()> {
         "exact staged incoming data tree is unavailable"
     );
     fs::rename(&journal.tree_stage, &journal.tree)?;
+    Ok(())
+}
+
+fn install_incoming_configuration(configuration: &RestoreConfiguration) -> anyhow::Result<()> {
+    if let Some(target) = observed_current_file(&configuration.target, &configuration.name)? {
+        ensure!(
+            target == configuration.incoming,
+            "current configuration target blocks incoming installation"
+        );
+        ensure!(
+            !path_exists(&configuration.stage)?,
+            "incoming configuration exists at both target and stage"
+        );
+        return Ok(());
+    }
+    ensure!(
+        observed_current_file(&configuration.stage, &configuration.name)?.as_ref()
+            == Some(&configuration.incoming),
+        "exact staged incoming configuration is unavailable"
+    );
+    fs::rename(&configuration.stage, &configuration.target)?;
     Ok(())
 }
 
@@ -1229,6 +1527,52 @@ fn restore_original_tree(journal: &RestoreJournal) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn restore_original_configuration(configuration: &RestoreConfiguration) -> anyhow::Result<()> {
+    match configuration.original_file.as_ref() {
+        Some(original) => {
+            if !path_exists(&configuration.original)? {
+                ensure!(
+                    observed_current_file(&configuration.target, &configuration.name)?.as_ref()
+                        == Some(original),
+                    "exact original configuration is unavailable for rollback"
+                );
+                return Ok(());
+            }
+            if path_exists(&configuration.target)? {
+                ensure!(
+                    observed_current_file(&configuration.target, &configuration.name)?.as_ref()
+                        == Some(&configuration.incoming),
+                    "rollback configuration target is not the exact incoming generation"
+                );
+                ensure!(
+                    !path_exists(&configuration.stage)?,
+                    "rollback configuration stage is already occupied"
+                );
+                fs::rename(&configuration.target, &configuration.stage)?;
+            }
+            ensure!(
+                observed_current_file(&configuration.original, &configuration.name)?.as_ref()
+                    == Some(original),
+                "exact preserved configuration is unavailable for rollback"
+            );
+            fs::rename(&configuration.original, &configuration.target)?;
+            sync_parent(&configuration.target)?;
+        }
+        None => {
+            if path_exists(&configuration.target)? {
+                ensure!(
+                    observed_current_file(&configuration.target, &configuration.name)?.as_ref()
+                        == Some(&configuration.incoming),
+                    "rollback refuses an unknown configuration target"
+                );
+                fs::remove_file(&configuration.target)?;
+                sync_parent(&configuration.target)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn verify_installed_generation(journal: &RestoreJournal) -> anyhow::Result<()> {
     verify_incoming_generation(
         &journal.incoming_database,
@@ -1240,7 +1584,23 @@ fn verify_installed_generation(journal: &RestoreJournal) -> anyhow::Result<()> {
         verify_database(journal.product, &journal.database)? == journal.schema_identity,
         "installed current database identity mismatch"
     );
-    verify_product_state(journal.product, &journal.database, &journal.tree)
+    verify_product_state(journal.product, &journal.database, &journal.tree)?;
+    verify_installed_configuration(journal, false)
+}
+
+fn verify_installed_configuration(journal: &RestoreJournal, original: bool) -> anyhow::Result<()> {
+    for configuration in &journal.configuration_targets {
+        let expected = if original {
+            configuration.original_file.as_ref()
+        } else {
+            Some(&configuration.incoming)
+        };
+        ensure!(
+            observed_current_file(&configuration.target, &configuration.name)?.as_ref() == expected,
+            "installed current configuration does not match its journal"
+        );
+    }
+    Ok(())
 }
 
 fn verify_incoming_generation(
@@ -1339,19 +1699,81 @@ impl CompositeCurrentOptions {
     }
 }
 
+fn configuration_names(files: &[NamedFile]) -> Vec<&str> {
+    let mut names = files
+        .iter()
+        .map(|file| file.name.as_str())
+        .collect::<Vec<_>>();
+    names.sort_unstable();
+    names
+}
+
+fn current_configuration_names(files: &[CurrentFile]) -> Vec<&str> {
+    let mut names = files
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect::<Vec<_>>();
+    names.sort_unstable();
+    names
+}
+
+fn validate_product_resources(
+    product: Product,
+    configuration: &[CurrentFile],
+    external: &[ExternalRequirement],
+) -> anyhow::Result<()> {
+    match product {
+        Product::MediaBackup => ensure!(
+            configuration.is_empty() && external.is_empty(),
+            "Media current resources are not exact"
+        ),
+        Product::DufsRam => ensure!(
+            current_configuration_names(configuration) == ["dufs.yaml"] && external.is_empty(),
+            "Dufs current resources are not exact"
+        ),
+        Product::SentinelMonitor => ensure!(
+            current_configuration_names(configuration)
+                == ["mediamtx.lock", "mediamtx.yml", "sentinel.env"]
+                && external.len() == 1
+                && external[0].kind == "credentials-key"
+                && external[0].kid == "sentinel-credentials-0.2.0-key-1"
+                && external[0].algorithm == "aes-256-gcm-hkdf-sha256"
+                && external[0].envelope_version == 1,
+            "Sentinel current resources are not exact"
+        ),
+        _ => anyhow::bail!("unsupported composite current product {product}"),
+    }
+    Ok(())
+}
+
 fn validate_options(options: &CompositeCurrentOptions) -> anyhow::Result<()> {
     product_contract(options.product)?;
     for path in [&options.database, &options.tree, &options.output] {
         ensure!(path.is_absolute(), "current adapter paths must be absolute");
     }
+    let verifying_published_backup = options.database == options.output.join(DATABASE_FILE)
+        && options.tree == options.output.join(TREE_DIRECTORY);
     ensure!(
-        !options.output.starts_with(&options.tree) && !options.tree.starts_with(&options.output),
+        verifying_published_backup
+            || (!options.output.starts_with(&options.tree)
+                && !options.tree.starts_with(&options.output)),
         "backup output and data tree must be disjoint"
     );
     match options.product {
         Product::MediaBackup => ensure!(
             options.credentials().is_none() && options.configuration.is_empty(),
             "Media current adapter does not accept external key or configuration resources"
+        ),
+        Product::SentinelMonitor => ensure!(
+            options.credentials().is_some()
+                && configuration_names(&options.configuration)
+                    == ["mediamtx.lock", "mediamtx.yml", "sentinel.env"],
+            "Sentinel current adapter requires its external key and exact three configuration resources"
+        ),
+        Product::DufsRam => ensure!(
+            options.credentials().is_none()
+                && configuration_names(&options.configuration) == ["dufs.yaml"],
+            "Dufs current adapter requires exactly dufs.yaml and no external key"
         ),
         _ => anyhow::bail!(
             "no strict composite current adapter for {}",
@@ -1367,6 +1789,16 @@ fn product_contract(product: Product) -> anyhow::Result<(&'static str, u64, &'st
             MEDIA_CURRENT_APPLICATION_VERSION,
             MEDIA_SCHEMA_REVISION,
             MEDIA_SCHEMA_SHA256,
+        )),
+        Product::SentinelMonitor => Ok((
+            SENTINEL_CURRENT_APPLICATION_VERSION,
+            SENTINEL_SCHEMA_REVISION,
+            SENTINEL_SCHEMA_SHA256,
+        )),
+        Product::DufsRam => Ok((
+            DUFS_CURRENT_APPLICATION_VERSION,
+            DUFS_SCHEMA_REVISION,
+            DUFS_SCHEMA_SHA256,
         )),
         _ => anyhow::bail!("unsupported composite current product {product}"),
     }
@@ -1385,19 +1817,146 @@ fn verify_database(product: Product, path: &Path) -> anyhow::Result<SchemaIdenti
 
 fn verify_external_key(
     product: Product,
-    _database: &Path,
+    database: &Path,
     credentials: Option<(&str, &[u8; 32])>,
 ) -> anyhow::Result<()> {
     match (product, credentials) {
         (Product::MediaBackup, None) => Ok(()),
+        (Product::DufsRam, None) => Ok(()),
+        (Product::SentinelMonitor, Some((kid, key))) => {
+            ensure!(
+                kid == SENTINEL_KEY_ID,
+                "Sentinel credentials key ID is not current"
+            );
+            verify_sentinel_credentials(database, key)
+        }
         _ => anyhow::bail!("external credentials are not valid for {product}"),
     }
+}
+
+fn verify_sentinel_credentials(database: &Path, master_key: &[u8; 32]) -> anyhow::Result<()> {
+    let mut derived_key = [0_u8; 32];
+    Hkdf::<Sha256>::new(Some(SENTINEL_KEY_DERIVATION_SALT), master_key)
+        .expand(SENTINEL_KEY_DERIVATION_INFO, &mut derived_key)
+        .map_err(|_| anyhow::anyhow!("Sentinel credential key derivation failed"))?;
+    let cipher = Aes256Gcm::new_from_slice(&derived_key)
+        .map_err(|_| anyhow::anyhow!("Sentinel credential key is invalid"))?;
+    let connection = Connection::open_with_flags(database, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let mut statement = connection.prepare(
+        "SELECT id, main_stream_url_enc, sub_stream_url_enc, username_enc, password_enc \
+         FROM cameras ORDER BY id",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Vec<u8>>(1)?,
+            row.get::<_, Option<Vec<u8>>>(2)?,
+            row.get::<_, Option<Vec<u8>>>(3)?,
+            row.get::<_, Option<Vec<u8>>>(4)?,
+        ))
+    })?;
+    for row in rows {
+        let (camera_id, main, sub, username, password) = row?;
+        let camera_id =
+            Uuid::parse_str(&camera_id).context("Sentinel camera ID is not a canonical UUID")?;
+        for (field, envelope) in [
+            ("main_stream_url_enc", Some(main)),
+            ("sub_stream_url_enc", sub),
+            ("username_enc", username),
+            ("password_enc", password),
+        ] {
+            if let Some(envelope) = envelope {
+                decrypt_sentinel_credential(&cipher, camera_id, field, &envelope)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn decrypt_sentinel_credential(
+    cipher: &Aes256Gcm,
+    camera_id: Uuid,
+    field: &str,
+    encoded: &[u8],
+) -> anyhow::Result<()> {
+    ensure!(
+        !encoded.is_empty() && encoded.len() <= SENTINEL_MAX_ENVELOPE_BYTES,
+        "Sentinel credential envelope is not exactly current or authenticated"
+    );
+    let envelope: SentinelCredentialEnvelope = serde_json::from_slice(encoded)
+        .context("Sentinel credential envelope is not exactly current or authenticated")?;
+    ensure!(
+        serde_json::to_vec(&envelope)? == encoded
+            && envelope.product == Product::SentinelMonitor.slug()
+            && envelope.application_version == SENTINEL_CURRENT_APPLICATION_VERSION
+            && envelope.envelope_revision == 1
+            && envelope.key_id == SENTINEL_KEY_ID,
+        "Sentinel credential envelope is not exactly current or authenticated"
+    );
+    let nonce = decode_sentinel_base64(&envelope.nonce)?;
+    let nonce: [u8; 12] = nonce.try_into().map_err(|_| {
+        anyhow::anyhow!("Sentinel credential envelope is not exactly current or authenticated")
+    })?;
+    let ciphertext = decode_sentinel_base64(&envelope.ciphertext)?;
+    ensure!(
+        (16..=SENTINEL_MAX_PLAINTEXT_BYTES + 16).contains(&ciphertext.len()),
+        "Sentinel credential envelope is not exactly current or authenticated"
+    );
+    let aad = sentinel_credential_aad(camera_id, field);
+    let plaintext = cipher
+        .decrypt(
+            Nonce::from_slice(&nonce),
+            Payload {
+                msg: &ciphertext,
+                aad: &aad,
+            },
+        )
+        .map_err(|_| {
+            anyhow::anyhow!("Sentinel credential envelope is not exactly current or authenticated")
+        })?;
+    String::from_utf8(plaintext)
+        .map(|_| ())
+        .map_err(|_| anyhow::anyhow!("Sentinel credential plaintext is not UTF-8"))
+}
+
+fn decode_sentinel_base64(encoded: &str) -> anyhow::Result<Vec<u8>> {
+    let decoded = URL_SAFE_NO_PAD.decode(encoded).map_err(|_| {
+        anyhow::anyhow!("Sentinel credential envelope is not exactly current or authenticated")
+    })?;
+    ensure!(
+        URL_SAFE_NO_PAD.encode(&decoded) == encoded,
+        "Sentinel credential envelope is not exactly current or authenticated"
+    );
+    Ok(decoded)
+}
+
+fn sentinel_credential_aad(camera_id: Uuid, field: &str) -> Vec<u8> {
+    let camera_id = camera_id.hyphenated().to_string();
+    let revision = "1";
+    let mut aad = Vec::new();
+    for value in [
+        SENTINEL_AAD_DOMAIN,
+        Product::SentinelMonitor.slug(),
+        SENTINEL_CURRENT_APPLICATION_VERSION,
+        revision,
+        SENTINEL_KEY_ID,
+        camera_id.as_str(),
+        field,
+    ] {
+        aad.extend_from_slice(&(value.len() as u64).to_be_bytes());
+        aad.extend_from_slice(value.as_bytes());
+    }
+    aad
 }
 
 fn external_requirements(
     options: &CompositeCurrentOptions,
 ) -> anyhow::Result<Vec<ExternalRequirement>> {
-    Ok(match options.credentials() {
+    Ok(external_requirements_for(options.credentials()))
+}
+
+fn external_requirements_for(credentials: Option<(&str, &[u8; 32])>) -> Vec<ExternalRequirement> {
+    match credentials {
         Some((kid, key)) => vec![ExternalRequirement {
             kind: "credentials-key".to_owned(),
             kid: kid.to_owned(),
@@ -1406,12 +1965,27 @@ fn external_requirements(
             envelope_version: 1,
         }],
         None => Vec::new(),
-    })
+    }
 }
 
 fn verify_product_state(product: Product, database: &Path, tree: &Path) -> anyhow::Result<()> {
     match product {
         Product::MediaBackup => verify_media_state(database, tree),
+        Product::SentinelMonitor | Product::DufsRam => {
+            let connection =
+                Connection::open_with_flags(database, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+            let foreign_keys: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM pragma_foreign_key_check",
+                [],
+                |row| row.get(0),
+            )?;
+            ensure!(
+                foreign_keys == 0,
+                "current product foreign key check failed"
+            );
+            inventory_tree(tree)?;
+            Ok(())
+        }
         _ => anyhow::bail!("unsupported current product {product}"),
     }
 }
@@ -1422,6 +1996,20 @@ fn verify_configuration(product: Product, files: &[NamedFile], _tree: &Path) -> 
             ensure!(
                 files.is_empty(),
                 "Media Backup has no configuration resources"
+            );
+            Ok(())
+        }
+        Product::SentinelMonitor => {
+            ensure!(
+                configuration_names(files) == ["mediamtx.lock", "mediamtx.yml", "sentinel.env"],
+                "Sentinel configuration resources are not exact"
+            );
+            Ok(())
+        }
+        Product::DufsRam => {
+            ensure!(
+                configuration_names(files) == ["dufs.yaml"],
+                "Dufs configuration resource is not exact"
             );
             Ok(())
         }
@@ -1675,6 +2263,11 @@ fn validate_manifest(manifest: &CurrentBackupManifest) -> anyhow::Result<()> {
                 "Media backup unexpectedly requires an external key"
             );
         }
+        Product::SentinelMonitor | Product::DufsRam => validate_product_resources(
+            manifest.product,
+            &manifest.configuration,
+            &manifest.external_requirements,
+        )?,
         _ => unreachable!(),
     }
     Ok(())
@@ -1696,6 +2289,10 @@ impl ProductLocks {
             Product::MediaBackup => vec![
                 sibling(database, "media-backup.lock")?,
                 sibling(tree, "media-backup.lock")?,
+            ],
+            Product::SentinelMonitor | Product::DufsRam => vec![
+                sibling(database, &format!("{}.lock", product.slug()))?,
+                sibling(tree, &format!("{}.lock", product.slug()))?,
             ],
             _ => anyhow::bail!("unsupported product lock contract"),
         };
@@ -1751,10 +2348,6 @@ fn verify_current_backup_root(directory: &Path) -> anyhow::Result<()> {
             .file_name()
             .into_string()
             .map_err(|_| anyhow::anyhow!("backup root entry name is not UTF-8"))?;
-        ensure!(
-            name == DATABASE_FILE || name == TREE_DIRECTORY || name == MANIFEST_FILE,
-            "backup root contains an unexpected entry: {name}"
-        );
         let metadata = fs::symlink_metadata(entry.path())?;
         if name == TREE_DIRECTORY {
             ensure!(metadata.is_dir(), "backup tree is not a directory");
@@ -1766,10 +2359,19 @@ fn verify_current_backup_root(directory: &Path) -> anyhow::Result<()> {
         }
         ensure!(actual.insert(name), "backup root entry is duplicated");
     }
-    let expected = [DATABASE_FILE, MANIFEST_FILE, TREE_DIRECTORY]
+    ensure!(
+        actual.contains(MANIFEST_FILE),
+        "backup root has no manifest"
+    );
+    let manifest = read_manifest(directory)?;
+    let mut expected = [DATABASE_FILE, MANIFEST_FILE, TREE_DIRECTORY]
         .into_iter()
         .map(str::to_owned)
         .collect::<BTreeSet<_>>();
+    for configuration in &manifest.configuration {
+        validate_name(&configuration.path)?;
+        expected.insert(configuration.path.clone());
+    }
     ensure!(
         actual == expected,
         "backup root does not contain the exact current resource set"
@@ -1872,11 +2474,22 @@ fn cleanup_recovery_directory(recovery: &Path, journal: &RestoreJournal) -> anyh
     if path_exists(&journal.tree_stage)? {
         fs::remove_dir_all(&journal.tree_stage)?;
     }
+    for configuration in &journal.configuration_targets {
+        if path_exists(&configuration.original)? {
+            fs::remove_file(&configuration.original)?;
+        }
+        if path_exists(&configuration.stage)? {
+            fs::remove_file(&configuration.stage)?;
+        }
+    }
     discard_uncommitted_journal_update(recovery)?;
     fs::remove_file(recovery.join("restore-journal.json"))?;
     fs::remove_dir(recovery)?;
     sync_parent(&journal.database)?;
     sync_parent(&journal.tree)?;
+    for configuration in &journal.configuration_targets {
+        sync_parent(&configuration.target)?;
+    }
     Ok(())
 }
 
@@ -1985,6 +2598,30 @@ fn ensure_source_and_targets_are_disjoint(
     Ok(())
 }
 
+fn ensure_configuration_targets_are_disjoint(
+    source: &Path,
+    database: &Path,
+    tree: &Path,
+    configuration: &[NamedFile],
+) -> anyhow::Result<()> {
+    let mut targets = BTreeSet::new();
+    targets.insert(database.to_path_buf());
+    for file in configuration {
+        ensure!(
+            !file.path.starts_with(source)
+                && !source.starts_with(&file.path)
+                && !file.path.starts_with(tree)
+                && !tree.starts_with(&file.path),
+            "current restore configuration targets must be disjoint from backup and data tree"
+        );
+        ensure!(
+            targets.insert(file.path.clone()),
+            "current restore configuration targets are not distinct"
+        );
+    }
+    Ok(())
+}
+
 fn hash_length_framed(hasher: &mut Sha256, value: &[u8]) {
     hasher.update((value.len() as u64).to_be_bytes());
     hasher.update(value);
@@ -2062,14 +2699,18 @@ fn lower_hex(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::{fs::symlink, net::UnixListener};
+    use std::os::unix::fs::symlink;
 
     use super::*;
 
     fn create_exact_backup_root(path: &Path) {
         fs::create_dir(path).unwrap();
         fs::write(path.join(DATABASE_FILE), b"database").unwrap();
-        fs::write(path.join(MANIFEST_FILE), b"manifest").unwrap();
+        fs::write(
+            path.join(MANIFEST_FILE),
+            serde_json::to_vec_pretty(&test_manifest()).unwrap(),
+        )
+        .unwrap();
         fs::create_dir(path.join(TREE_DIRECTORY)).unwrap();
     }
 
@@ -2119,6 +2760,34 @@ mod tests {
         }
     }
 
+    fn sentinel_test_envelope(key: &[u8; 32], camera_id: Uuid, plaintext: &str) -> Vec<u8> {
+        let mut derived_key = [0_u8; 32];
+        Hkdf::<Sha256>::new(Some(SENTINEL_KEY_DERIVATION_SALT), key)
+            .expand(SENTINEL_KEY_DERIVATION_INFO, &mut derived_key)
+            .unwrap();
+        let cipher = Aes256Gcm::new_from_slice(&derived_key).unwrap();
+        let nonce = [3_u8; 12];
+        let aad = sentinel_credential_aad(camera_id, "main_stream_url_enc");
+        let ciphertext = cipher
+            .encrypt(
+                Nonce::from_slice(&nonce),
+                Payload {
+                    msg: plaintext.as_bytes(),
+                    aad: &aad,
+                },
+            )
+            .unwrap();
+        serde_json::to_vec(&SentinelCredentialEnvelope {
+            product: Product::SentinelMonitor.slug().to_owned(),
+            application_version: SENTINEL_CURRENT_APPLICATION_VERSION.to_owned(),
+            envelope_revision: 1,
+            key_id: SENTINEL_KEY_ID.to_owned(),
+            nonce: URL_SAFE_NO_PAD.encode(nonce),
+            ciphertext: URL_SAFE_NO_PAD.encode(ciphertext),
+        })
+        .unwrap()
+    }
+
     fn test_restore_journal(root: &Path) -> (PathBuf, RestoreJournal) {
         let source = root.join("source");
         fs::create_dir(&source).unwrap();
@@ -2160,6 +2829,7 @@ mod tests {
             original_database: None,
             original_tree: None,
             configuration: Vec::new(),
+            configuration_targets: Vec::new(),
             external_requirements: Vec::new(),
             phase: RestorePhase::Prepared,
         };
@@ -2184,9 +2854,35 @@ mod tests {
         fs::write(backup.join(MANIFEST_FILE), b"manifest").unwrap();
 
         fs::remove_file(backup.join(DATABASE_FILE)).unwrap();
-        let socket = UnixListener::bind(backup.join(DATABASE_FILE)).unwrap();
+        fs::create_dir(backup.join(DATABASE_FILE)).unwrap();
         assert!(verify_current_backup_root(&backup).is_err());
-        drop(socket);
+    }
+
+    #[test]
+    fn sentinel_external_key_must_authenticate_every_credential_envelope() {
+        let root = tempfile::tempdir().unwrap();
+        let database = root.path().join("sentinel.sqlite3");
+        let connection = Connection::open(&database).unwrap();
+        connection
+            .execute_batch(include_str!(
+                "../tests/fixtures/sources/sentinel-monitor/0.2.0/database.sql"
+            ))
+            .unwrap();
+        let camera_id = Uuid::new_v4();
+        let key = [7_u8; 32];
+        let envelope = sentinel_test_envelope(&key, camera_id, "rtsp://camera.invalid/main");
+        connection
+            .execute(
+                "INSERT INTO cameras(\
+                    id,name,main_stream_url_enc,created_at,updated_at\
+                 ) VALUES(?1,'Camera',?2,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')",
+                (camera_id.hyphenated().to_string(), envelope),
+            )
+            .unwrap();
+        drop(connection);
+
+        verify_sentinel_credentials(&database, &key).unwrap();
+        assert!(verify_sentinel_credentials(&database, &[8_u8; 32]).is_err());
     }
 
     #[test]
@@ -2217,6 +2913,7 @@ mod tests {
         manifest
             .configuration
             .push(test_current_file("handwritten.conf"));
+        fs::write(backup.join("handwritten.conf"), b"x").unwrap();
         fs::write(
             backup.join(MANIFEST_FILE),
             serde_json::to_vec_pretty(&manifest).unwrap(),

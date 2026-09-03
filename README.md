@@ -10,11 +10,16 @@
 数据树、key、输入和输出路径都由每次 CLI 显式提供。
 
 项目仍处于开发阶段，当前没有任何历史升级边；`support --json` 的 `upgrade_edges` 全部为空，二进制也不
-提供 `upgrade-*` 命令。已实现范围是 Media Backup 当前组合状态，以及 Host Monitoring、Sunshine Manager
-当前 SQLite 的备份/验证/恢复。备份不可变、带摘要且不覆盖；恢复先暂存验证，再通过持久 journal 切换。
+提供 `upgrade-*` 命令。已实现 Media、Sentinel 和 Dufs 的当前组合状态，以及 Host、Sunshine 的当前
+SQLite 状态备份/验证/恢复。备份不可变、带摘要且不覆盖；恢复先暂存验证，再通过持久 journal 切换。
 
-跨项目线协议来自 Foundation：`sarmg-contracts` 与 `sarmg-schema-identity` 均精确固定为 `=0.3.0`，
-Git rev 精确固定为 `1fe326081cfd896f05ff502e80f99504797c14c6`。`sarmg-contracts` 是当前 backup manifest、资源类别和
+平台化 P0 已在 `tests/fixtures/sources/<product>/<version>/` 冻结未迁移产品的脱敏 current-state source
+fixture。每套 SQLite fixture 都包含管理员、有效 Session、Unicode/长度边界业务数据和审计记录，并由测试
+复算精确 Schema fingerprint 与外键完整性。Dufs 的静态管理员和内存 Session 另以配置及行为 Golden 文件
+表达。已退役的 Sunshine 0.7 夹具已删除；当前代码不包含历史 parser 或兼容路径。
+
+跨项目线协议来自 Foundation 0.4.0：`sarmg-contracts` 与 `sarmg-schema-identity` 均使用精确版本。
+`sarmg-contracts` 是当前 backup manifest、资源类别和
 `SchemaIdentity` 的唯一 Rust 线类型，`sarmg-schema-identity` 是 `product_metadata` 形状、schema row
 查询及 SHA-256 framing 的唯一算法实现。本仓库只实现 rusqlite 读取适配器和更严格的产品策略，例如精确
 current identity、相对路径、资源唯一/排序、密钥要求、文件系统防护与恢复状态机；Foundation 不读取产品
@@ -30,9 +35,9 @@ current identity、相对路径、资源唯一/排序、密钥要求、文件系
 |---|---|---|---|---|
 | Media Backup | `0.2.0` / revision 1 / `2563e6afc3fff272d02b7a5615272cc773862243bfd15aec51655abf1d9c6b1c` | composite backup、verify、restore | `recover-media-restore` | 无 |
 | Host Monitoring | `0.7.0` / revision 1 / `12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05` | SQLite backup、verify、restore | `recover-sqlite` | 无 |
-| Sunshine Manager | `0.7.0` / revision 1 / `a717bcd5a591e7f7cc6da5826af88ad0deab2fdc339ce4649ad84f21ea879dbc` | keyed SQLite backup、verify、restore | 不对外支持 | key ID 与独立 32-byte credentials key |
-| Sentinel Monitor | 无 current adapter | 无 | 无 | catalog 中的资源声明不是支持声明 |
-| Dufs RAM | 无 current adapter | 无 | 无 | 禁止用 SQLite-only 命令替代组合备份 |
+| Sunshine Manager | `0.8.0` / revision 2 / `c9dedb33dd7a5ad613e762eb135a7aa5184ce1df52166459bee7b3485b4b3be3` | keyed SQLite backup、verify、restore | 不对外支持 | key ID 与独立 32-byte credentials key |
+| Sentinel Monitor | `0.2.0` / revision 1 / `f547ddc817d830d23b5305bb1f88b29898d6531568edd6eb194c2b629eb560c0` | composite current | `recover-current` | 三个配置文件与当前 credentials key |
+| Dufs RAM | `0.50.1` / revision 1 / `3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423` | composite current | `recover-current` | `dufs.yaml` |
 | Sarmg Foundation | 无运行时状态 | 无 | 不适用 | 源码/制品由 Git 与 package 流程管理 |
 
 所有产品的 `upgrade_edges` 均为空。仓库中存在 `UpgradeEdge` 线类型以及可复用的备份、验证、同文件系统
@@ -50,13 +55,23 @@ SQL、adapter registry、graph search、`from/to` 选择器或 `upgrade-*` CLI�
 ├─ catalog [--json]
 └─ inspect-manifest MANIFEST
 
-Media current composite state
+Media current composite state（保留的专用命令是 generic current 命令的等价入口）
 ├─ backup-media --database ABS --data-dir ABS --output ABS
 ├─ verify-media-backup --input ABS
 ├─ restore-media --input ABS --database ABS --data-dir ABS [--replace-existing]
 └─ recover-media-restore --expect-version 0.2.0 --input BACKUP_ABS
    --database DB_ABS --data-dir TREE_ABS --recovery RECOVERY_ABS
    --action commit|rollback
+
+Media/Sentinel/Dufs current composite state
+├─ backup-current --product PRODUCT --database ABS --data-dir ABS --output ABS
+│  [--configuration NAME=ABS ...] [key options]
+├─ verify-current --product PRODUCT --input ABS [key options]
+├─ restore-current --product PRODUCT --input ABS --database ABS --data-dir ABS
+│  [--configuration NAME=TARGET_ABS ...] [--replace-existing] [key options]
+└─ recover-current --product PRODUCT --expect-version VERSION --input ABS
+   --database DB_ABS --data-dir TREE_ABS --recovery RECOVERY_ABS
+   --action commit|rollback [key options]
 
 Host/Sunshine current SQLite-only state
 ├─ backup-sqlite --product PRODUCT --database ABS --output ABS [key options]
@@ -71,8 +86,8 @@ Host/Sunshine current SQLite-only state
 Sunshine key，也不解析 Media composite manifest。`catalog` 只回答“产品的完整持久状态由哪些资源组成”，
 不回答“当前二进制是否实现 adapter”。只有 `support` 可以授权选择命令。
 
-Media composite manifest 的唯一 current wire version 是 3；不读取 version 2，也不保留双 parser。Media backup
-根目录必须恰好包含 `database.sqlite3`、`tree/`、`manifest.json`。v3 的 tree inventory 把 tree 根 mode、
+Composite manifest 的唯一 current wire version 是 3；不读取 version 2，也不保留双 parser。备份
+根目录必须恰好包含 manifest 声明的数据库、数据树和配置资源。v3 的 tree inventory 把 tree 根 mode、
 各非根目录 mode、文件 path/mode/size/SHA 和聚合摘要全部绑定；顶层 extra entry、tree 中的链接/特殊文件、
 任一 mode 或内容漂移都会使 full verify 失败。
 
@@ -88,7 +103,7 @@ Media composite manifest 的唯一 current wire version 是 3；不读取 versio
 - stage/incoming/recovery 与目标位于同一文件系统；发生 `EXDEV` 时拒绝，不添加 copy fallback。
 - 工具不负责停止、启动或屏蔽 systemd/watchdog；操作者必须先停服，maintenance lock 只是最后防线。
 - verify 永远只读，不修复 metadata、manifest、Hash、tree 或密文；失败输入作为证据保全。
-- Sunshine raw key 不进入 manifest、备份、stdout、Debug 或日志；key file 还必须满足普通文件、单硬链接、
+- Sunshine/Sentinel raw key 不进入 manifest、备份、stdout、Debug 或日志；key file 还必须满足普通文件、单硬链接、
   私有权限、稳定文件身份和精确 32-byte 解码边界。
 - recovery 路径一旦报告就不得手工移动、编辑、拼接或删除；仅在对应产品明确支持时，用同一 binary 和显式
   `commit`/`rollback` 继续。
@@ -101,10 +116,11 @@ Media composite manifest 的唯一 current wire version 是 3；不读取 versio
 | `src/support.rs` | 当前二进制能力的唯一机器可读目录；所有历史 edge 为空 |
 | `src/catalog.rs` | 六个产品的完整持久资源合同，不作实现承诺 |
 | `src/manifest.rs` | Foundation SQLite manifest 的产品级严格包装 |
-| `src/current.rs` | Media current DB+tree 组合备份、验证、恢复和 recovery |
+| `src/current.rs` | Media/Sentinel/Dufs current 组合备份、验证、恢复和 recovery |
 | `src/sqlite.rs` | Host/Sunshine current SQLite snapshot、identity、manifest 与安全文件层 |
 | `src/sqlite/restore.rs` | SQLite restore journal、original/sidecar 保全、commit/rollback |
 | `tests/` 与模块内测试 | current identity、恶意输入、并发、故障和 CLI/release 回归 |
+| `tests/fixtures/sources/` | 当前未迁移产品的脱敏 P0 source fixture；不作为旧版本兼容输入 |
 | `scripts/` | supply-chain 检查与 source-bound 正式发行 |
 | `docs/` | 仅保留初学者、流程、完整功能取舍和运维分类 |
 
@@ -128,8 +144,8 @@ sarmg-upgrade support --json
 sarmg-upgrade catalog --json
 ```
 
-`support --json` 的 `formal_release_target` 必须精确为 `x86_64-unknown-linux-gnu`。`catalog` 只描述资源合同，
-不能把 Sentinel/Dufs 的目录项解读为已经存在备份命令。
+`support --json` 的 `formal_release_target` 必须精确为 `x86_64-unknown-linux-gnu`。`catalog` 描述完整资源合同，
+`support` 描述当前二进制实际可执行的 adapter。
 
 ## 文档
 

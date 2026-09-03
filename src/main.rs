@@ -4,7 +4,7 @@ use anyhow::{Context, ensure};
 use clap::{Parser, Subcommand};
 use sarmg_upgrade::{
     BackupManifest, CompositeCurrentOptions, CurrentRecoveryAction, CurrentRecoveryOptions,
-    CurrentRestoreOptions, Product, RecoveryAction, RestoreExisting, backup_current,
+    CurrentRestoreOptions, NamedFile, Product, RecoveryAction, RestoreExisting, backup_current,
     create_sqlite_backup, create_sqlite_backup_with_credentials, credentials_key_from_file,
     recover_current, recover_sqlite_restore, restore_current, restore_sqlite_backup,
     restore_sqlite_backup_with_credentials, support_matrix, verify_current_backup,
@@ -32,6 +32,70 @@ enum Command {
     },
     InspectManifest {
         manifest: PathBuf,
+    },
+    BackupCurrent {
+        #[arg(long)]
+        product: Product,
+        #[arg(long)]
+        database: PathBuf,
+        #[arg(long)]
+        data_dir: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long = "configuration", value_name = "NAME=ABSOLUTE_PATH")]
+        configuration: Vec<String>,
+        #[arg(long)]
+        credentials_key_id: Option<String>,
+        #[arg(long)]
+        credentials_key_file: Option<PathBuf>,
+    },
+    VerifyCurrent {
+        #[arg(long)]
+        product: Product,
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        credentials_key_id: Option<String>,
+        #[arg(long)]
+        credentials_key_file: Option<PathBuf>,
+    },
+    RestoreCurrent {
+        #[arg(long)]
+        product: Product,
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        database: PathBuf,
+        #[arg(long)]
+        data_dir: PathBuf,
+        #[arg(long = "configuration", value_name = "NAME=ABSOLUTE_PATH")]
+        configuration: Vec<String>,
+        #[arg(long)]
+        replace_existing: bool,
+        #[arg(long)]
+        credentials_key_id: Option<String>,
+        #[arg(long)]
+        credentials_key_file: Option<PathBuf>,
+    },
+    RecoverCurrent {
+        #[arg(long)]
+        product: Product,
+        #[arg(long)]
+        expect_version: String,
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        database: PathBuf,
+        #[arg(long)]
+        data_dir: PathBuf,
+        #[arg(long)]
+        recovery: PathBuf,
+        #[arg(long)]
+        action: CurrentRecoveryAction,
+        #[arg(long)]
+        credentials_key_id: Option<String>,
+        #[arg(long)]
+        credentials_key_file: Option<PathBuf>,
     },
     BackupMedia {
         #[arg(long)]
@@ -128,6 +192,97 @@ fn main() -> anyhow::Result<()> {
                 .with_context(|| format!("inspect {}", manifest.display()))?;
             println!("{}", serde_json::to_string_pretty(&parsed)?);
             Ok(())
+        }
+        Command::BackupCurrent {
+            product,
+            database,
+            data_dir,
+            output,
+            configuration,
+            credentials_key_id,
+            credentials_key_file,
+        } => {
+            let (credentials_key_id, credentials_key) =
+                optional_credentials(credentials_key_id, credentials_key_file)?;
+            print_current(backup_current(&CompositeCurrentOptions {
+                product,
+                database,
+                tree: data_dir,
+                output,
+                runtime_directory: None,
+                configuration: parse_named_files(configuration)?,
+                credentials_key_id,
+                credentials_key,
+            })?)
+        }
+        Command::VerifyCurrent {
+            product,
+            input,
+            credentials_key_id,
+            credentials_key_file,
+        } => {
+            let (credentials_key_id, credentials_key) =
+                optional_credentials(credentials_key_id, credentials_key_file)?;
+            print_current(verify_current_backup(&CompositeCurrentOptions {
+                product,
+                database: input.join("database.sqlite3"),
+                tree: input.join("tree"),
+                configuration: backup_configuration(product, &input)?,
+                output: input,
+                runtime_directory: None,
+                credentials_key_id,
+                credentials_key,
+            })?)
+        }
+        Command::RestoreCurrent {
+            product,
+            input,
+            database,
+            data_dir,
+            configuration,
+            replace_existing,
+            credentials_key_id,
+            credentials_key_file,
+        } => {
+            let (credentials_key_id, credentials_key) =
+                optional_credentials(credentials_key_id, credentials_key_file)?;
+            print_current(restore_current(&CurrentRestoreOptions {
+                product,
+                input,
+                database,
+                tree: data_dir,
+                runtime_directory: None,
+                configuration: parse_named_files(configuration)?,
+                replace_existing,
+                credentials_key_id,
+                credentials_key,
+            })?)
+        }
+        Command::RecoverCurrent {
+            product,
+            expect_version,
+            input,
+            database,
+            data_dir,
+            recovery,
+            action,
+            credentials_key_id,
+            credentials_key_file,
+        } => {
+            let (credentials_key_id, credentials_key) =
+                optional_credentials(credentials_key_id, credentials_key_file)?;
+            print_current(recover_current(&CurrentRecoveryOptions {
+                product,
+                expected_application_version: expect_version,
+                input,
+                database,
+                tree: data_dir,
+                runtime_directory: None,
+                recovery_directory: recovery,
+                action,
+                credentials_key_id,
+                credentials_key,
+            })?)
         }
         Command::BackupMedia {
             database,
@@ -272,6 +427,60 @@ fn sqlite_credentials(
         (_, None, None) => Ok(None),
         _ => anyhow::bail!("credentials key options are only valid for sunshine-manager"),
     }
+}
+
+fn optional_credentials(
+    key_id: Option<String>,
+    key_file: Option<PathBuf>,
+) -> anyhow::Result<(Option<String>, Option<[u8; 32]>)> {
+    match (key_id, key_file) {
+        (Some(key_id), Some(key_file)) => {
+            Ok((Some(key_id), Some(credentials_key_from_file(&key_file)?)))
+        }
+        (None, None) => Ok((None, None)),
+        _ => anyhow::bail!(
+            "--credentials-key-id and --credentials-key-file must be provided together"
+        ),
+    }
+}
+
+fn parse_named_files(values: Vec<String>) -> anyhow::Result<Vec<NamedFile>> {
+    values
+        .into_iter()
+        .map(|value| {
+            let (name, path) = value
+                .split_once('=')
+                .context("--configuration must use NAME=ABSOLUTE_PATH")?;
+            let path = PathBuf::from(path);
+            ensure!(
+                !name.is_empty() && path.is_absolute(),
+                "configuration name must be non-empty and path absolute"
+            );
+            Ok(NamedFile {
+                name: name.to_owned(),
+                path,
+            })
+        })
+        .collect()
+}
+
+fn backup_configuration(
+    product: Product,
+    input: &std::path::Path,
+) -> anyhow::Result<Vec<NamedFile>> {
+    let names: &[&str] = match product {
+        Product::MediaBackup => &[],
+        Product::SentinelMonitor => &["sentinel.env", "mediamtx.yml", "mediamtx.lock"],
+        Product::DufsRam => &["dufs.yaml"],
+        _ => anyhow::bail!("no composite current adapter for {product}"),
+    };
+    Ok(names
+        .iter()
+        .map(|name| NamedFile {
+            name: (*name).to_owned(),
+            path: input.join(name),
+        })
+        .collect())
 }
 
 fn print_support(json: bool) -> anyhow::Result<()> {

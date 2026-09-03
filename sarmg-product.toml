@@ -1,0 +1,12 @@
+format = 1
+product_id = "sarmg-upgrade"
+
+[foundation]
+platform_generation = 1
+version = "0.4.0"
+git_rev = "0e1be10273fd6abf72e0d0eeb24cbb1120572486"
+
+[[components]]
+id = "cli"
+profile = "offline-tool"
+capabilities = ["explicit-paths", "private-state", "restore-journal", "linux-openat2", "secret-envelope"]

@@ -42,8 +42,8 @@ catalog。Foundation 没有 runtime state，所以 catalog 中存在但没有 ba
 
 ## 4. 当前实现范围
 
-Media Backup `0.2.0` 支持数据库与 data tree 组合备份；Host Monitoring `0.7.0` 和 Sunshine Manager
-`0.7.0` 支持严格 SQLite 备份。Sentinel、Dufs 当前组合备份尚未实现，所有历史升级 edge 也未实现。
+Media Backup `0.2.0`、Sentinel Monitor `0.2.0` 和 Dufs RAM `0.50.1` 支持严格组合备份；
+Host Monitoring `0.7.0` 和 Sunshine Manager `0.8.0` 支持严格 SQLite-only 备份。所有历史升级 edge 均未实现。
 自动化必须读取 `support --json`，不能根据 catalog 或本文推断命令。
 
 ## 5. 为什么先复制再解析
@@ -55,8 +55,8 @@ adapter 若加入，必须先在 exclusive maintenance lock 下保存 source 证
 ## 6. 为什么不能只复制 app.db
 
 WAL 模式下已提交数据可能仍在 `-wal`，只复制主文件会生成逻辑旧快照。Media Backup 还包括媒体树；
-Sunshine 依赖 external credential key。Sentinel/Dufs 虽在 catalog 中声明组合资源，但当前未实现对应
-命令，不能用通用 `cp` 或 SQLite 命令替代。
+Sunshine 和 Sentinel 依赖 external credential key。Sentinel/Dufs 的组合 adapter 必须通过
+`*-current` 命令同代处理数据库、数据树与精确配置集，不能用通用 `cp` 或 SQLite 命令替代。
 
 ## 7. 外部密钥
 
@@ -94,9 +94,9 @@ envelope version/Hash 要求。备份验证和恢复时重新提供受保护 key
 |---|---|---|---|
 | Media Backup | SQLite + data tree 组合 adapter | `0.2.0` / r1 / `2563e6afc3fff272d02b7a5615272cc773862243bfd15aec51655abf1d9c6b1c` | 支持显式 commit/rollback |
 | Host Monitoring | SQLite-only adapter | `0.7.0` / r1 / `12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05` | 支持显式 commit/rollback |
-| Sunshine Manager | keyed SQLite-only adapter | `0.7.0` / r1 / `a717bcd5a591e7f7cc6da5826af88ad0deab2fdc339ce4649ad84f21ea879dbc` | restore 可执行，但 recover 未对外支持 |
-| Sentinel Monitor | 未实现 | 不适用 | 无命令 |
-| Dufs RAM | 未实现 | 不适用 | 无命令 |
+| Sunshine Manager | keyed SQLite-only adapter | `0.8.0` / r2 / `c9dedb33dd7a5ad613e762eb135a7aa5184ce1df52166459bee7b3485b4b3be3` | restore 可执行，但 recover 未对外支持 |
+| Sentinel Monitor | DB/recordings/三配置/key 组合 adapter | `0.2.0` / r1 / `f547ddc817d830d23b5305bb1f88b29898d6531568edd6eb194c2b629eb560c0` | `recover-current` commit/rollback |
+| Dufs RAM | DB/shared root/`dufs.yaml` 组合 adapter | `0.50.1` / r1 / `3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423` | `recover-current` commit/rollback |
 | Sarmg Foundation | 无运行时状态 | 不适用 | 不适用 |
 
 这些 SHA 是当前代码拥有的 allowlist，不是“同产品大致兼容”的版本提示。即使 manifest、metadata 与真实
@@ -161,5 +161,5 @@ path/mode/size/SHA 纳入聚合摘要。root chmod、顶层 extra entry、hardli
 - 仓库根 [README](../../README.md)用于快速确认平台、能力与目录入口。
 
 本文和各章节不会把未来准入设计写成当前功能。凡涉及历史 edge 的段落都必须同时明确：当前
-`upgrade_edges=[]`、没有 `upgrade-*` CLI、没有 source parser/转换 SQL/graph executor，Sentinel 与 Dufs
-也没有 current adapter。
+`upgrade_edges=[]`、没有 `upgrade-*` CLI、没有 source parser/转换 SQL/graph executor。Sentinel 与 Dufs
+的 current adapter 已实现，但它们不构成历史升级 edge。

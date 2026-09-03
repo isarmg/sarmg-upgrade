@@ -1358,7 +1358,7 @@ mod tests {
         let backup = root.path().join("backup");
         create_current_database(&source, Product::HostMonitoring, "0.7.0");
         create_current_database(&host_destination, Product::HostMonitoring, "0.7.0");
-        create_current_database(&sunshine_destination, Product::SunshineManager, "0.7.0");
+        create_current_database(&sunshine_destination, Product::SunshineManager, "0.8.0");
         insert_test_record(&host_destination, Product::HostMonitoring, "keep-host");
         insert_test_record(
             &sunshine_destination,
@@ -1372,7 +1372,7 @@ mod tests {
         assert!(
             restore_sqlite_backup(
                 Product::SunshineManager,
-                "0.7.0",
+                "0.8.0",
                 &backup,
                 &sunshine_destination,
                 RestoreExisting::Replace,

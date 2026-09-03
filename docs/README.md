@@ -13,7 +13,7 @@
 | 运维 | [operations.md](operations.md) | 命令、停机、权限、备份、恢复、演练和发行 |
 
 共享协议与产品工具的边界见[功能清单 2.1 节](feature-inventory-and-tradeoffs.md#21-foundation-与本工具的责任边界)：
-Foundation 的 `sarmg-contracts`、`sarmg-schema-identity` 均以 `=0.3.0` 和不可变 Git rev
-`1fe326081cfd896f05ff502e80f99504797c14c6` 提供 driver-independent 当前线类型和 schema 算法；本仓库
+Foundation 的 `sarmg-contracts`、`sarmg-schema-identity` 均以 `=0.4.0` 和不可变 Git rev
+`0e1be10273fd6abf72e0d0eeb24cbb1120572486` 提供 driver-independent 当前线类型和 schema 算法；本仓库
 拥有 rusqlite、产品版本、文件系统、密钥与恢复状态机。双方都不保留旧版本 fallback，开发与发行也不得
 改用 workspace sibling、Cargo path dependency、可变 branch 或本地副本。

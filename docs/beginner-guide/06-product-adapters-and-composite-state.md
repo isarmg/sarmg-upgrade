@@ -52,44 +52,43 @@ SQLite-only 物理资源还依赖 external credential key。verify/restore 必�
 所有非 NULL Host `secret` 与所有非 NULL operation `request_ciphertext`；是否属于“已完成”状态不影响扫描。
 原始 key 不进包。
 
-当前 exact identity 是 `0.7.0` / revision 1 /
-`a717bcd5a591e7f7cc6da5826af88ad0deab2fdc339ce4649ad84f21ea879dbc`。manifest 中 external requirement 固定
+当前 exact identity 是 `0.8.0` / revision 2 /
+`c9dedb33dd7a5ad613e762eb135a7aa5184ce1df52166459bee7b3485b4b3be3`。manifest 中 external requirement 固定
 记录 `kind=credentials-key`、key ID、key SHA-256、`algorithm=aes-256-gcm`、`envelope_version=1`；记录摘要
 不等于拥有 key。
 
 key ID 必须是 1..64 个 `[A-Za-z0-9_-]`；key file 不超过 4096 bytes、为单硬链接私有普通文件，读取前后
 身份和 metadata 不变，Base64 解码后精确 32 bytes。verify 会扫描并认证上述全部非 NULL 密文，防止一个
-“ID 相同但 bytes 不同”的 key 被误接受。当前 AES-256-GCM 解密使用 12-byte nonce 与 empty AAD；文档不能
-把未来可能加入的产品 AAD 绑定写成当前保证。
+“ID 相同但 bytes 不同”的 key 被误接受。当前 AES-256-GCM 解密使用 12-byte nonce；Host 凭据
+绑定 Host ID 与 `secret` 字段域，operation request 绑定 operation ID、action 与
+`request_ciphertext` 字段域的长度分帧 AAD。空 AAD 密文必须拒绝。
 
 Sunshine 支持 current backup/verify/restore，但 `support` 的 recover 列表为空。恢复中断后保全现场并进入
 人工事件流程；不能用 Host recover，也不能因为知道 key 就手工完成 journal。
 
 ## 6.6 Sentinel Monitor
 
-SQLite + MediaMTX config/contract + recordings tree + external key 是一个组合。当前工具尚未实现 Sentinel
-组合命令，因此不能分别恢复数据库与录像，也不能使用 generic SQLite 冒充完整备份。
-
-catalog 的存在是对未来实现的约束：任何 Sentinel adapter 都必须同时覆盖 SQLite、configuration、companion
-contract、recordings 与 external key；在这五项闭包完成前 support 必须保持空。当前没有 Sentinel current
-version/SHA allowlist、命令或 recovery，文档也不得提供“暂时只备数据库”的受支持步骤。
+SQLite + MediaMTX config/contract + recordings tree + external key 是一个组合。当前 `0.2.0` / revision 1 /
+`f547ddc817d830d23b5305bb1f88b29898d6531568edd6eb194c2b629eb560c0` adapter 使用 `backup-current`、
+`verify-current`、`restore-current` 和 `recover-current`，严格要求 `mediamtx.lock`、`mediamtx.yml`、
+`sentinel.env` 三个配置、recordings 树与当前 credentials key。密文按当前 HKDF/AES-GCM/AAD 合同逐条认证。
+任何缺失、额外、改名或内容不一致都会使完整 verify 失败；不能使用 generic SQLite 冒充完整备份。
 
 ## 6.7 Dufs
 
-SQLite + protected YAML + shared root 构成状态。当前工具尚未实现 Dufs 组合命令；未来实现必须处理目录
-语义、budgets 以及 config/shared root 锁，当前不得使用 generic SQLite 替代。
-
-Dufs 的 data-plane 用户/文件所有者规则、protected YAML 和 shared root 是产品语义，不能由管理数据库单独
-重建。Dufs 自己是否使用不同前端技术也与本离线 CLI 无关；本工具没有前端。当前 support 中 Dufs 四类
-能力为空，也没有所谓“最小 SQLite adapter”。
+SQLite + protected YAML + shared root 构成状态。当前 `0.50.1` / revision 1 /
+`3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423` adapter 使用同一组 `*-current` 命令，
+并要求配置集恰好是 `dufs.yaml`。备份、恢复和 recovery 将数据库、shared root 与配置作为同一代处理。
+Dufs 的 data-plane 用户/文件所有者规则、protected YAML 和 shared root 是产品语义，不能由管理数据库单独重建，
+也不能使用 generic SQLite 命令替代。
 
 ## 6.8 Sarmg Foundation
 
 Foundation 没有 runtime state；catalog 可说明这一事实，但不提供 backup/restore adapter。源码和 package
 发布由 Git/registry 流程管理，不能伪装成数据库备份。
 
-本工具依赖 Foundation `sarmg-contracts =0.3.0` 与 `sarmg-schema-identity =0.3.0`，两者 Git rev 都是
-`1fe326081cfd896f05ff502e80f99504797c14c6`。这说明共享当前线类型和算法来自 Foundation；不表示 Foundation
+本工具依赖 Foundation `sarmg-contracts =0.4.0` 与 `sarmg-schema-identity =0.4.0`，两者 Git rev 都是
+`0e1be10273fd6abf72e0d0eeb24cbb1120572486`。这说明共享当前线类型和算法来自 Foundation；不表示 Foundation
 是运行时服务，也不表示它替产品验证数据库。不得改用 workspace sibling、Cargo path dependency、可变
 branch 或本地副本，也不能在依赖不可用时复制一份旧类型作 fallback。
 

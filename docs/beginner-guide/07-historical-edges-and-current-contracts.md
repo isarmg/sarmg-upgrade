@@ -62,8 +62,8 @@ rg 'upgrade-|from-version|to-version' src
 trigger，缺失对象或 DDL 变化都会自然产生不同摘要，并在任何备份发布或恢复 mutation 前拒绝。这样既能阻止
 “表看起来相似”的开发数据库混入当前备份，也不会为了某个旧实现留下特殊兼容代码。
 
-共享 `sarmg-contracts =0.3.0` 和 `sarmg-schema-identity =0.3.0` 同样只描述当前协议；两者只从不可变
-Git rev `1fe326081cfd896f05ff502e80f99504797c14c6` 取得。精确依赖的意义是让各项目对当前 manifest、metadata
+共享 `sarmg-contracts =0.4.0` 和 `sarmg-schema-identity =0.4.0` 同样只描述当前协议；两者只从不可变
+Git rev `0e1be10273fd6abf72e0d0eeb24cbb1120572486` 取得。精确依赖的意义是让各项目对当前 manifest、metadata
 和 fingerprint 使用同一事实，并不意味着 Foundation 能读取 0.2 或 0.1 数据库。不得改用 workspace sibling、
 Cargo path dependency、可变 branch 或本地旧类型，也不得加入 serde alias、双算法比对或“先新后旧”parser；
 未来历史输入只能由本仓库中精确绑定 source/target 的独立 edge adapter 处理，不能扩宽 current parser。

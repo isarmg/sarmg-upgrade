@@ -10,8 +10,8 @@
 完整 JSON，而不是只匹配某个字符串。一个安全的自动化判定必须同时确认 product、operation、version 和
 formal target，且不得在缺失时回退到 catalog 或硬编码默认。
 
-当前矩阵的关键不对称是：Media 和 Host 有 recover，Sunshine 没有；Sentinel、Dufs、Foundation 的四个
-current 列表均为空；六个产品的 `upgrade_edges` 均为空。不能把一个产品的能力复制到另一个产品。
+当前矩阵的关键不对称是：Media、Host、Sentinel 和 Dufs 有 recover，Sunshine 没有；
+Foundation 没有 runtime state；六个产品的 `upgrade_edges` 均为空。不能把一个产品的能力复制到另一个产品。
 
 ## 4.2 `catalog --json`
 
@@ -23,8 +23,8 @@ catalog 描述产品的当前状态版本、Schema、数据库、树、config、
 | Media Backup | SQLite + data tree | 有专用 composite adapter |
 | Host Monitoring | SQLite | 有 SQLite-only adapter |
 | Sunshine Manager | SQLite + external credentials key 要求 | 有 keyed SQLite-only adapter |
-| Sentinel Monitor | SQLite + configuration + companion contract + recordings | 无 adapter |
-| Dufs RAM | SQLite + data tree + configuration | 无 adapter |
+| Sentinel Monitor | SQLite + configuration + companion contract + recordings | 有 composite current adapter，并要求 external key |
+| Dufs RAM | SQLite + data tree + configuration | 有 composite current adapter |
 | Sarmg Foundation | 空，无 runtime state | 无需 adapter |
 
 catalog 的作用是阻止“只备份数据库就算完整”的误解。例如 Dufs 有 SQLite，但同时有 protected YAML 与 shared
@@ -35,8 +35,8 @@ root；所以 generic SQLite 命令必须拒绝 Dufs，而不是因为资源列�
 manifest 把 backup 身份、工具版本、产品/版本、资源、文件 mode/size/Hash、tree aggregate、预算和非秘密
 external requirement 固化。它不包含 raw key，也不单凭自报内容获得信任。
 
-SQLite-only manifest 的线格式来自 Foundation `sarmg-contracts =0.3.0`，其不可变 Git rev 为
-`1fe326081cfd896f05ff502e80f99504797c14c6`。本工具不是把共享 JSON
+SQLite-only manifest 的线格式来自 Foundation `sarmg-contracts =0.4.0`，其不可变 Git rev 为
+`0e1be10273fd6abf72e0d0eeb24cbb1120572486`。本工具不是把共享 JSON
 复制一遍，而是直接包装共享 `BackupManifest`，并直接复用 `BackupResource`、
 `BackupExternalRequirement`、`StateResourceKind` 与 `SchemaIdentity`。共享层保证字段名、unknown-field
 拒绝、identifier/SHA 和 JavaScript safe-integer 边界一致；本工具再验证以下产品事实：

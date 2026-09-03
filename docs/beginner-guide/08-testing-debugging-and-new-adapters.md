@@ -125,7 +125,7 @@ CLI 与 release，不能扩宽 current allowlist。
 | Media adapter | DB/tree 同代与业务引用 | missing blob、BLAKE3/size 错、symlink/hardlink、tree drift |
 | Sunshine key | Secret 文件与密文认证 | mode/nlink/race、wrong key/ID、tampered envelope |
 | restore/recover | crash consistency | 每个 phase、journal tamper、same-filesystem、重复 action |
-| CLI/support | 可达能力边界 | Sentinel/Dufs generic 拒绝、Sunshine recover 拒绝、无 upgrade 命令 |
+| CLI/support | 可达能力边界 | Sentinel/Dufs generic SQLite 拒绝且 composite 可达、Sunshine recover 拒绝、无 upgrade 命令 |
 | release | source-bound 制品 | dirty tree、SHA mismatch、asset overwrite、support snapshot drift |
 
 ## 8.10 本章检查

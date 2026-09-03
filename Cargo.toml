@@ -17,8 +17,8 @@ blake3 = "1"
 clap = { version = "4.5", features = ["derive"] }
 hkdf = "0.12"
 rand = "0.8"
-sarmg-contracts = { version = "=0.3.0", git = "https://github.com/isarmg/sarmg-foundation.git", rev = "1fe326081cfd896f05ff502e80f99504797c14c6" }
-sarmg-schema-identity = { version = "=0.3.0", git = "https://github.com/isarmg/sarmg-foundation.git", rev = "1fe326081cfd896f05ff502e80f99504797c14c6" }
+sarmg-contracts = { version = "=0.4.0", git = "https://github.com/isarmg/sarmg-foundation.git", rev = "0e1be10273fd6abf72e0d0eeb24cbb1120572486" }
+sarmg-schema-identity = { version = "=0.4.0", git = "https://github.com/isarmg/sarmg-foundation.git", rev = "0e1be10273fd6abf72e0d0eeb24cbb1120572486" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = { package = "serde_yaml_ng", version = "0.10" }

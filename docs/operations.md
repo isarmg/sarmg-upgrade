@@ -96,13 +96,13 @@ Sunshine 命令在 Host 参数基础上必须同时提供当前 key ID 和私有
 sarmg-upgrade backup-sqlite \
   --product sunshine-manager \
   --database /var/lib/isarmg/sunshine-manager/db/sunshine-manager.sqlite3 \
-  --output /srv/backup/sunshine-manager-0.7.0-20260830 \
+  --output /srv/backup/sunshine-manager-0.8.0-20260902 \
   --credentials-key-id current-key-1 \
   --credentials-key-file /run/credentials/sunshine-manager.key
 
 sarmg-upgrade verify-sqlite \
   --product sunshine-manager \
-  --input /srv/backup/sunshine-manager-0.7.0-20260830 \
+  --input /srv/backup/sunshine-manager-0.8.0-20260902 \
   --credentials-key-id current-key-1 \
   --credentials-key-file /run/credentials/sunshine-manager.key
 ```
@@ -110,7 +110,7 @@ sarmg-upgrade verify-sqlite \
 key 文件内容为 Base64 编码的精确 32 bytes；文件必须为单硬链接普通文件、无 group/other 权限、读取中
 身份和元数据不变。原始 key 不进入备份、manifest 或输出。工具会实际认证全部非 NULL Host `secret` 和
 全部非 NULL operation `request_ciphertext`，不按 operation 完成状态过滤，也不只比较 key ID。当前
-AES-256-GCM envelope 使用 12-byte nonce 与 empty AAD。
+AES-256-GCM envelope 使用 12-byte nonce，并严格校验产品域、对象 ID、action 与字段域的长度分帧 AAD。
 
 恢复也必须提供同一组 key 参数。Sunshine restore 的中断 recovery 当前未列为对外支持能力：遇到残留时
 保持服务停止、保全目录和日志，禁止调用 Host recovery 或手工替换文件。
@@ -118,7 +118,7 @@ AES-256-GCM envelope 使用 12-byte nonce 与 empty AAD。
 ## 6. 当前禁止操作
 
 - 不存在任何 `upgrade-*`、`verify-*-source-backup` 或 `recover-*-upgrade` 命令；
-- Sentinel 和 Dufs 暂无完整当前组合备份，不能用 `backup-sqlite` 替代；
+- Sentinel 和 Dufs 必须使用 `backup-current`/`verify-current`/`restore-current`，不能用 `backup-sqlite` 替代；
 - 不对未知产品、版本、Schema、manifest 增加临时兼容；
 - 不编辑 metadata/SHA 让旧库冒充当前库；
 - 不直接 `cp app.db`，WAL 中可能仍有已提交数据；
@@ -155,8 +155,8 @@ Secret；不得同时接受新旧两把 key，也不得从下载归档本身建�
 
 Foundation 依赖是发布输入而不是运行时服务。发行前另行核对：
 
-1. `sarmg-contracts` 与 `sarmg-schema-identity` 均精确为 `=0.3.0`，Git rev 精确为
-   `1fe326081cfd896f05ff502e80f99504797c14c6`；
+1. `sarmg-contracts` 与 `sarmg-schema-identity` 均精确为 `=0.4.0`，Git rev 精确为
+   `0e1be10273fd6abf72e0d0eeb24cbb1120572486`；
 2. `Cargo.lock` 中没有第二版本，也没有 registry/path fallback 或可漂移 branch；
 3. `cargo test --locked --all-targets --all-features` 覆盖 shared manifest parser、metadata column/row adapter、
    schema fingerprint 和本仓库产品级负例；
@@ -219,7 +219,9 @@ sarmg-upgrade catalog --json
 |---|---:|---:|---|---|
 | Media Backup | `0.2.0` | 1 | `2563e6afc3fff272d02b7a5615272cc773862243bfd15aec51655abf1d9c6b1c` | composite backup/verify/restore/recover |
 | Host Monitoring | `0.7.0` | 1 | `12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05` | SQLite backup/verify/restore/recover |
-| Sunshine Manager | `0.7.0` | 1 | `a717bcd5a591e7f7cc6da5826af88ad0deab2fdc339ce4649ad84f21ea879dbc` | keyed SQLite backup/verify/restore；无 recover |
+| Sunshine Manager | `0.8.0` | 2 | `c9dedb33dd7a5ad613e762eb135a7aa5184ce1df52166459bee7b3485b4b3be3` | keyed SQLite backup/verify/restore；无 recover |
+| Sentinel Monitor | `0.2.0` | 1 | `f547ddc817d830d23b5305bb1f88b29898d6531568edd6eb194c2b629eb560c0` | DB/recordings/三个配置/key 组合 backup/verify/restore/recover |
+| Dufs RAM | `0.50.1` | 1 | `3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423` | DB/shared root/`dufs.yaml` 组合 backup/verify/restore/recover |
 
 这些值用于核对 binary/code/release，不是允许手写进数据库或 manifest 的“修复参数”。工具会从实际
 `sqlite_schema` 计算 fingerprint，并检查 `product_metadata` 五列/单行和 integrity/FK。任何额外对象都会

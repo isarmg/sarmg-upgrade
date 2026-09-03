@@ -173,14 +173,14 @@ SQLite restore 代码相似就把 Host recover 用于 Sunshine。
 空间预算不足、output 已存在、锁被服务持有、数据库 sidecar 遗漏、key file mode 不安全、目标跨文件系统、
 路径包含链接或 manifest 超预算，都应显式失败，不能用放宽检查继续。
 
-另一个常见误区是把 catalog 输出当命令目录。Sentinel 与 Dufs 会出现在 catalog，因为未来完整 adapter 必须
-知道它们的组合资源；它们的 `current_state` 在 support 中仍为空。若实验步骤需要为这两个产品运行 backup，
-说明步骤本身越过了当前边界，应停止而不是寻找 generic 绕过方式。
+另一个常见误区是把 catalog 输出当命令目录。Sentinel 与 Dufs 会出现在 catalog，
+但只有 `support --json` 能证明当前 binary 确实实现了它们的 `backup-current`/`verify-current`/
+`restore-current`/`recover-current` 能力。即使当前支持，也不得寻找 generic SQLite 绕过方式。
 
 ## 2.12 本章练习与验收
 
 1. 解释为什么生产主机不应 `cargo run`。
-2. 从同一个 binary 保存 support/catalog，并指出两者对 Sentinel 的答案为什么不同。
+2. 从同一个 binary 保存 support/catalog，并说明 catalog 的资源描述为何不能替代 Sentinel 的 support 能力声明。
 3. 完成一次 Media 或 Host 的新 output backup/verify，再证明重用 output 会失败且旧内容不变。
 4. 在副本上完成一次单字节篡改负例。
 5. 写出 restore 后仍需产品 doctor/smoke 的原因。

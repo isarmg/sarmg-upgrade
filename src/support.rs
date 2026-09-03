@@ -2,7 +2,10 @@ use serde::Serialize;
 
 use crate::{
     Product,
-    current::MEDIA_CURRENT_APPLICATION_VERSION,
+    current::{
+        DUFS_CURRENT_APPLICATION_VERSION, MEDIA_CURRENT_APPLICATION_VERSION,
+        SENTINEL_CURRENT_APPLICATION_VERSION,
+    },
     sqlite::{HOST_CURRENT_APPLICATION_VERSION, SUNSHINE_CURRENT_APPLICATION_VERSION},
 };
 
@@ -84,15 +87,13 @@ pub fn support_matrix() -> SupportMatrix {
         },
         ProductSupport {
             product: Product::SentinelMonitor,
-            current_state: CurrentStateSupport::none(),
+            current_state: CurrentStateSupport::exact(SENTINEL_CURRENT_APPLICATION_VERSION, true),
             upgrade_edges: Vec::new(),
-            // Product catalog data is not a support claim. Until an adapter is
-            // implemented, the support output advertises no operational input.
-            external_requirements: Vec::new(),
+            external_requirements: vec!["credentials-key"],
         },
         ProductSupport {
             product: Product::DufsRam,
-            current_state: CurrentStateSupport::none(),
+            current_state: CurrentStateSupport::exact(DUFS_CURRENT_APPLICATION_VERSION, true),
             upgrade_edges: Vec::new(),
             external_requirements: Vec::new(),
         },

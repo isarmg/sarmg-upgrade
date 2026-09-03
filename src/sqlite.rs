@@ -51,10 +51,10 @@ pub(crate) const HOST_CURRENT_APPLICATION_VERSION: &str = "0.7.0";
 pub(super) const HOST_CURRENT_SCHEMA_REVISION: u64 = 1;
 pub(super) const HOST_CURRENT_SCHEMA_SHA256: &str =
     "12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05";
-pub(crate) const SUNSHINE_CURRENT_APPLICATION_VERSION: &str = "0.7.0";
-pub(super) const SUNSHINE_CURRENT_SCHEMA_REVISION: u64 = 1;
+pub(crate) const SUNSHINE_CURRENT_APPLICATION_VERSION: &str = "0.8.0";
+pub(super) const SUNSHINE_CURRENT_SCHEMA_REVISION: u64 = 2;
 pub(super) const SUNSHINE_CURRENT_SCHEMA_SHA256: &str =
-    "a717bcd5a591e7f7cc6da5826af88ad0deab2fdc339ce4649ad84f21ea879dbc";
+    "c9dedb33dd7a5ad613e762eb135a7aa5184ce1df52166459bee7b3485b4b3be3";
 
 pub(super) fn official_sqlite_identity(product: Product) -> anyhow::Result<SchemaIdentity> {
     require_sqlite_only_product(product)?;
@@ -981,7 +981,9 @@ mod tests {
             .pragma_update(None, "foreign_keys", "ON")
             .unwrap();
         connection.execute_batch(schema).unwrap();
-        connection.execute_batch(PRODUCT_METADATA_DDL).unwrap();
+        if product == Product::HostMonitoring {
+            connection.execute_batch(PRODUCT_METADATA_DDL).unwrap();
+        }
         let fingerprint = schema_fingerprint_connection(&connection).unwrap();
         assert_eq!(fingerprint, official.schema_sha256);
         connection
@@ -1184,7 +1186,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let database = root.path().join("source.sqlite3");
         let output = root.path().join("backup");
-        create_current_database(&database, Product::SunshineManager, "0.7.0");
+        create_current_database(&database, Product::SunshineManager, "0.8.0");
         fs::create_dir(&output).unwrap();
         fs::write(output.join("keep"), b"unchanged").unwrap();
         assert!(create_sqlite_backup(Product::SunshineManager, &database, &output).is_err());
