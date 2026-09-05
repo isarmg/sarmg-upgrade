@@ -211,11 +211,11 @@ mod tests {
     fn valid_manifest() -> BackupManifest {
         BackupManifest::new(ContractBackupManifest {
             manifest_version: MANIFEST_VERSION,
-            tool_version: "0.2.0".into(),
+            tool_version: env!("CARGO_PKG_VERSION").into(),
             product: Product::HostMonitoring.slug().into(),
-            application_version: "0.7.0".into(),
+            application_version: "0.8.0".into(),
             schema_identity: Some(
-                SchemaIdentity::new("host-monitoring", "0.7.0", 1, "b".repeat(64)).unwrap(),
+                SchemaIdentity::new("host-monitoring", "0.8.0", 1, "b".repeat(64)).unwrap(),
             ),
             created_at_epoch_seconds: 1,
             external_requirements: Vec::new(),

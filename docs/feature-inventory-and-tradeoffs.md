@@ -1,6 +1,6 @@
 # Sarmg Upgrade 完整功能与取舍清单
 
-本文描述 `sarmg-upgrade 0.2.0` 当前二进制实际提供的能力。项目仍在开发阶段，尚未形成可承诺的历史产品格式，因此当前支持矩阵中的 `upgrade_edges` 全部为空；仓库已删除 Host、Sunshine、Sentinel 和 Dufs 的试验性历史升级 SQL、适配器、source-backup 和 upgrade-recovery 命令。保留的是可复用的当前状态备份、严格校验、恢复、恢复日志和发布基础设施。
+本文描述 `sarmg-upgrade 0.3.0` 当前二进制实际提供的能力。项目仍在开发阶段，尚未形成可承诺的历史产品格式，因此当前支持矩阵中的 `upgrade_edges` 全部为空；仓库已删除 Host、Sunshine、Sentinel 和 Dufs 的试验性历史升级 SQL、适配器、source-backup 和 upgrade-recovery 命令。保留的是可复用的当前状态备份、严格校验、恢复、恢复日志和发布基础设施。
 
 正式工具唯一支持 Linux AMD64 GNU `x86_64-unknown-linux-gnu`。它是停机离线 CLI，不是 Server，也没有
 React/Vite 或其他前端；仓库当前无需运行时配置或服务部署，故不创建空 `config/`、`deploy/`、`clients/`。
@@ -74,9 +74,9 @@ React/Vite 或其他前端；仓库当前无需运行时配置或服务部署，
 | UPG-048 | Foundation manifest 包装叠加产品、Schema、资源和 key 策略 | `src/manifest.rs::validate` | 保障 | 高 | 只校验 JSON 形状会接受错产品、自洽假 identity 或危险路径 | runtime 产品资源非空；SQLite identity 必需；version 一致；key requirement 精确 |
 | UPG-049 | manifest 资源名/路径唯一、按名称严格递增、路径仅 normal relative component | `src/manifest.rs` | 保障 | 中 | 重复/乱序/穿越路径可覆盖或产生解析差异 | absolute、empty、`.`、`..`、duplicate name/path、unsorted 全拒绝 |
 | UPG-050 | Foundation safe JSON integer、identifier 与 hash 边界向下游保留 | `sarmg-contracts`、`src/manifest.rs` | 保障 | 中 | JavaScript/其他消费者可能丢精度，宽松 hash/name 产生歧义 | MAX_SAFE_JSON_INTEGER、positive counts、lowercase SHA、unknown fields golden fixtures |
-| UPG-051 | Media composite manifest 唯一 current version 3 与 current adapter ID | `src/current.rs::CURRENT_MANIFEST_VERSION`、`validate_manifest` | 保障 | 中 | 双读 v2/旧清单会重新引入旧 wire 合同，手写组合清单可能混入当前恢复 | version 3 正例；v2/unknown 拒绝且无 fallback；`media-backup-current-0.2.0-r1`、tool 0.2.0、product/version/identity 全精确 |
+| UPG-051 | Media composite manifest 唯一 current version 3 与 current adapter ID | `src/current.rs::CURRENT_MANIFEST_VERSION`、`validate_manifest` | 保障 | 中 | 双读 v2/旧清单会重新引入旧 wire 合同，手写组合清单可能混入当前恢复 | version 3 正例；v2/unknown 拒绝且无 fallback；`media-backup-current-0.2.0-r1`、tool 0.3.0、product/version/identity 全精确 |
 | UPG-052 | Media current Schema identity 固定 version 0.2.0/revision 1/SHA | `src/current.rs::product_contract` | 保障 | 中 | 错版本或 DDL 漂移进入 DB+tree 备份 | SHA `2563e6afc3fff272d02b7a5615272cc773862243bfd15aec51655abf1d9c6b1c`；metadata 与实际 schema 同验 |
-| UPG-053 | Host current identity 固定 0.7.0/revision 1/SHA | `src/sqlite.rs::official_sqlite_identity` | 保障 | 中 | generic SQLite 误接 Host 旧库或手改库 | SHA `12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05`；fixture 与 code allowlist |
+| UPG-053 | Host current identity 固定 0.8.0/revision 1/SHA | `src/sqlite.rs::official_sqlite_identity` | 保障 | 中 | generic SQLite 误接 Host 旧库或手改库 | SHA `12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05`；fixture 与 code allowlist |
 | UPG-054 | Sunshine current identity 固定 0.8.0/revision 2/SHA | `src/sqlite.rs::official_sqlite_identity` | 保障 | 中 | 密文校验前先接受错 schema，造成误读或漏扫 | SHA `c9dedb33dd7a5ad613e762eb135a7aa5184ce1df52166459bee7b3485b4b3be3`；fixture、integrity、FK |
 | UPG-055 | schema fingerprint 对纳入范围的对象统一处理，无表名特判 | `verify_schema_identity_database`、`sarmg-schema-identity` | 保障 | 高 | 特判“旧表”会形成 Foundation identity 之外的第二套兼容规则 | type/name/tbl_name/sql canonical query/framing；任意 extra/missing/DDL drift 自然 mismatch |
 | UPG-056 | Media 所有 database/tree/output 路径必须绝对且 output/tree 分离 | `src/current.rs::validate_options` | 保障 | 中 | cwd 变化或树内输出可造成递归复制、自包含和误删 | relative、output under tree、tree under output 拒绝；Media 不接受 key/config 参数 |
@@ -102,7 +102,7 @@ React/Vite 或其他前端；仓库当前无需运行时配置或服务部署，
 | UPG-076 | SQLite journal 记录 incoming hash、destination 与 originals 后才安装 | `src/sqlite/restore.rs::RestoreJournal` | 保障 | 高 | 断电后无法证明目标属于哪一代 | journal version/unknown fields/tamper；prepared/preserved/installed 故障点 |
 | UPG-077 | SQLite rollback 把已安装 incoming 保存在 abandoned-new 后恢复 originals | `resume_rollback` | 保障 | 高 | rollback 可能销毁唯一可调查的新代 | destination 必须证明为 original 或 incoming；NOREPLACE；恢复后 current verify |
 | UPG-078 | SQLite commit 证明 incoming/target 与每个 original 的唯一位置 | `resume_commit` | 保障 | 高 | commit 可能接受手工改动或丢 original | hash/bytes/path exact；歧义组合拒绝；完成后 verify 与 cleanup |
-| UPG-079 | `recover-sqlite` CLI 当前只允许 Host Monitoring | `src/main.rs::Command::RecoverSqlite` | 核心 | 中 | 若对 Sunshine开放会绕过 external key ciphertext 验证 | Host 0.7.0 正例；Sunshine/其他 product 负例；support recover 列表一致 |
+| UPG-079 | `recover-sqlite` CLI 当前只允许 Host Monitoring | `src/main.rs::Command::RecoverSqlite` | 核心 | 中 | 若对 Sunshine开放会绕过 external key ciphertext 验证 | Host 0.8.0 正例；Sunshine/其他 product 负例；support recover 列表一致 |
 | UPG-080 | Sunshine restore 可执行，但中断 recovery 不作为支持能力 | `restore_sqlite_backup_with_credentials`、`src/support.rs` | 保障 | 高 | 冒充可 recover 会诱导调用 Host 路径或手工拼接密文 DB | support recover 为空；残留目录保全并停止；不得调用 recover-sqlite |
 | UPG-081 | key ID 1～64 ASCII alnum/`-_`，key file base64 解码为精确 32 bytes | `validate_key_id`、`credentials_key_from_file` | 保障 | 中 | 模糊 key identity 或错误长度进入 AES-256-GCM | empty/65/非法字符/base64/31/33 bytes 负例；文件最大 4096 bytes |
 | UPG-082 | key 文件必须私有、单硬链接、普通文件，读取前中后复核 identity | `credentials_key_from_file` | 保障 | 高 | 攻击者替换/共享 Secret 或用特殊文件阻塞 | group/other bits、symlink/hardlink、dev/ino/size/mtime race；raw key 不输出 |
@@ -140,7 +140,7 @@ Foundation。
 | 产品 | 当前 backup/verify/restore | recover | 历史升级边 | 外部要求 |
 |---|---|---|---|---|
 | Media Backup `0.2.0` | DB + data tree 组合状态 | commit/rollback | 无 | 无 |
-| Host Monitoring `0.7.0` | SQLite | commit/rollback | 无 | 无 |
+| Host Monitoring `0.8.0` | SQLite | commit/rollback | 无 | 无 |
 | Sunshine Manager `0.8.0` | SQLite + 密文认证 | restore 中断恢复当前不对外声明 | 无 | credentials key ID + 32-byte key |
 | Sentinel Monitor `0.2.0` | DB + recordings + 三个配置 + 密文认证 | `recover-current` commit/rollback | 无 | credentials key ID + 32-byte key |
 | Dufs RAM `0.50.1` | DB + shared root + `dufs.yaml` | `recover-current` commit/rollback | 无 | 无 |

@@ -28,10 +28,10 @@ fn fixtures() -> [Fixture; 4] {
         },
         Fixture {
             application: "host-monitoring",
-            version: "0.7.0",
+            version: "0.8.0",
             fingerprint: "12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05",
-            schema: include_str!("fixtures/sources/host-monitoring/0.7.0/database.sql"),
-            seed: include_str!("fixtures/sources/host-monitoring/0.7.0/seed.sql"),
+            schema: include_str!("fixtures/sources/host-monitoring/0.8.0/database.sql"),
+            seed: include_str!("fixtures/sources/host-monitoring/0.8.0/seed.sql"),
             administrator_table: "auth_users",
             session_table: "auth_sessions",
             business_table: "monitored_hosts",

@@ -47,7 +47,7 @@ const DATABASE_FILE: &str = "database.sqlite3";
 const MANIFEST_FILE: &str = "manifest.json";
 const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 const MAX_CREDENTIAL_KEY_BYTES: u64 = 4096;
-pub(crate) const HOST_CURRENT_APPLICATION_VERSION: &str = "0.7.0";
+pub(crate) const HOST_CURRENT_APPLICATION_VERSION: &str = "0.8.0";
 pub(super) const HOST_CURRENT_SCHEMA_REVISION: u64 = 1;
 pub(super) const HOST_CURRENT_SCHEMA_SHA256: &str =
     "12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05";
@@ -1056,10 +1056,10 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let database = root.path().join("source.sqlite3");
         let output = root.path().join("backup");
-        create_current_database(&database, Product::HostMonitoring, "0.7.0");
+        create_current_database(&database, Product::HostMonitoring, "0.8.0");
 
         let backup = create_sqlite_backup(Product::HostMonitoring, &database, &output).unwrap();
-        assert_eq!(backup.manifest.application_version, "0.7.0");
+        assert_eq!(backup.manifest.application_version, "0.8.0");
         verify_sqlite_backup(Product::HostMonitoring, &output).unwrap();
 
         insert_test_record(&database, Product::HostMonitoring, "later");
@@ -1100,7 +1100,7 @@ mod tests {
         );
 
         let wrong_revision = root.path().join("wrong-revision.sqlite3");
-        create_current_database(&wrong_revision, Product::HostMonitoring, "0.7.0");
+        create_current_database(&wrong_revision, Product::HostMonitoring, "0.8.0");
         Connection::open(&wrong_revision)
             .unwrap()
             .execute("UPDATE product_metadata SET schema_revision=2", [])
@@ -1112,7 +1112,7 @@ mod tests {
         );
 
         let unknown_schema = root.path().join("unknown-schema.sqlite3");
-        create_current_database(&unknown_schema, Product::HostMonitoring, "0.7.0");
+        create_current_database(&unknown_schema, Product::HostMonitoring, "0.8.0");
         let connection = Connection::open(&unknown_schema).unwrap();
         connection
             .execute_batch("CREATE TABLE internally_consistent_unknown (id INTEGER PRIMARY KEY);")
@@ -1138,7 +1138,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let database = root.path().join("host.sqlite3");
         let backup = root.path().join("backup");
-        create_current_database(&database, Product::HostMonitoring, "0.7.0");
+        create_current_database(&database, Product::HostMonitoring, "0.8.0");
         create_sqlite_backup(Product::HostMonitoring, &database, &backup).unwrap();
 
         assert!(verify_sqlite_backup(Product::SunshineManager, &backup).is_err());
@@ -1155,7 +1155,7 @@ mod tests {
 
         let mut cross_product: serde_json::Value = serde_json::from_slice(&original).unwrap();
         cross_product["product"] = serde_json::json!("sunshine-manager");
-        cross_product["application_version"] = serde_json::json!("0.7.0");
+        cross_product["application_version"] = serde_json::json!("0.8.0");
         cross_product["schema_identity"]["application"] = serde_json::json!("sunshine-manager");
         cross_product["schema_identity"]["schema_sha256"] =
             serde_json::json!(SUNSHINE_CURRENT_SCHEMA_SHA256);
@@ -1241,7 +1241,7 @@ mod tests {
         let database = root.path().join("source.sqlite3");
         let first = root.path().join("first");
         let second = root.path().join("second");
-        create_current_database(&database, Product::HostMonitoring, "0.7.0");
+        create_current_database(&database, Product::HostMonitoring, "0.8.0");
         create_sqlite_backup(Product::HostMonitoring, &database, &first).unwrap();
         fs::write(first.join("unexpected"), b"no").unwrap();
         assert!(verify_sqlite_backup(Product::HostMonitoring, &first).is_err());
@@ -1265,7 +1265,7 @@ mod tests {
         let real = root.path().join("real");
         fs::create_dir(&real).unwrap();
         let database = real.join("source.sqlite3");
-        create_current_database(&database, Product::HostMonitoring, "0.7.0");
+        create_current_database(&database, Product::HostMonitoring, "0.8.0");
         hard_link(&database, real.join("alias.sqlite3")).unwrap();
         assert!(
             create_sqlite_backup(
@@ -1293,7 +1293,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let database = root.path().join("source.sqlite3");
         let output = root.path().join("backup");
-        create_current_database(&database, Product::HostMonitoring, "0.7.0");
+        create_current_database(&database, Product::HostMonitoring, "0.8.0");
         Connection::open(&database)
             .unwrap()
             .execute_batch("CREATE TABLE schema_drift (id INTEGER PRIMARY KEY);")
@@ -1308,7 +1308,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let database = root.path().join("source.sqlite3");
         let output = root.path().join("backup");
-        create_current_database(&database, Product::HostMonitoring, "0.7.0");
+        create_current_database(&database, Product::HostMonitoring, "0.8.0");
         let location = DatabaseLocation::resolve(&database).unwrap();
         let exclusive = location
             .acquire_lock(

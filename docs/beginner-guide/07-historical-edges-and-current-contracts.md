@@ -2,7 +2,7 @@
 
 ## 7.1 先区分“未来设计”与“当前功能”
 
-历史 edge 是一个精确 source version 到精确 target version 的有向转换。`sarmg-upgrade 0.2.0` 当前没有
+历史 edge 是一个精确 source version 到精确 target version 的有向转换。`sarmg-upgrade 0.3.0` 当前没有
 任何 edge：`support --json` 的数组为空，CLI 不注册 `upgrade-*`，源码也没有旧 Schema SQL/parser。
 本章后半解释未来准入标准，不表示命令已经存在。
 

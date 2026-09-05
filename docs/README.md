@@ -1,6 +1,6 @@
 # Sarmg Upgrade 文档总览
 
-本文档集描述当前 `0.2.0` 二进制。`support --json` 是能力的唯一权威；catalog 表示产品状态资源，不
+本文档集描述当前 `0.3.0` 二进制。`support --json` 是能力的唯一权威；catalog 表示产品状态资源，不
 代表每个产品一定存在某项命令。正式工具唯一目标为 Linux AMD64 GNU `x86_64-unknown-linux-gnu`；本仓库
 是无常驻进程、无前端的离线 CLI，因此没有 React/Vite 客户端，也不创建空 `config/`/`deploy/` 目录。
 

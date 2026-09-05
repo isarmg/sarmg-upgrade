@@ -37,7 +37,7 @@ exact 只有 DB、tree、manifest。BLAKE3 证明业务引用，SHA-256/inventor
 当前 Server 状态为 code-allowlisted SQLite，可使用受限 generic SQLite command。Agent 本地身份/Spool 不
 自动包含在 Server backup。当前没有 Host 历史 edge。
 
-当前 exact identity 是 `0.7.0` / revision 1 /
+当前 exact identity 是 `0.8.0` / revision 1 /
 `12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05`。Host 使用
 `backup-sqlite`、`verify-sqlite`、`restore-sqlite`，并且是 SQLite-only 产品中唯一公开
 `recover-sqlite` 的产品。
@@ -98,7 +98,7 @@ branch 或本地副本，也不能在依赖不可用时复制一份旧类型作 
 重写旧 manifest 的名称。
 
 canonical slugs 只有：`media-backup`、`host-monitoring`、`sunshine-manager`、`sentinel-monitor`、`dufs-ram`、
-`sarmg-foundation`。`FromStr` 精确比较；大小写变化、旧仓库名、展示名或拼写相近值都失败。当前无受支持
+`sarmg-foundation-server`。`FromStr` 精确比较；大小写变化、旧仓库名、展示名或拼写相近值都失败。当前无受支持
 旧名称 edge；未来稳定版本若必须迁移名称，只能在本 `sarmg-upgrade` 仓库新增精确 source/target 的独立
 adapter、fixture 与 CLI，不得向 current parser 添加 serde alias 或 fallback。
 

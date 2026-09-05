@@ -1,6 +1,6 @@
 # Sarmg Upgrade
 
-`sarmg-upgrade 0.2.0` 是 Sarmg 产品的离线 current-state 备份、验证与恢复工具。仓库记录未来历史 edge 的
+`sarmg-upgrade 0.3.0` 是 Sarmg 产品的离线 current-state 备份、验证与恢复工具。仓库记录未来历史 edge 的
 完整准入条件，但当前 binary 不是升级引擎。业务产品只创建并接受自身当前版本，不携带旧 Schema reader、
 自动 migration、兼容 alias、backup writer 或 restore code。
 
@@ -34,7 +34,7 @@ current identity、相对路径、资源唯一/排序、密钥要求、文件系
 | 产品 | 精确 current identity | 已实现命令族 | 中断 recover | 外部要求 |
 |---|---|---|---|---|
 | Media Backup | `0.2.0` / revision 1 / `2563e6afc3fff272d02b7a5615272cc773862243bfd15aec51655abf1d9c6b1c` | composite backup、verify、restore | `recover-media-restore` | 无 |
-| Host Monitoring | `0.7.0` / revision 1 / `12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05` | SQLite backup、verify、restore | `recover-sqlite` | 无 |
+| Host Monitoring | `0.8.0` / revision 1 / `12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05` | SQLite backup、verify、restore | `recover-sqlite` | 无 |
 | Sunshine Manager | `0.8.0` / revision 2 / `c9dedb33dd7a5ad613e762eb135a7aa5184ce1df52166459bee7b3485b4b3be3` | keyed SQLite backup、verify、restore | 不对外支持 | key ID 与独立 32-byte credentials key |
 | Sentinel Monitor | `0.2.0` / revision 1 / `f547ddc817d830d23b5305bb1f88b29898d6531568edd6eb194c2b629eb560c0` | composite current | `recover-current` | 三个配置文件与当前 credentials key |
 | Dufs RAM | `0.50.1` / revision 1 / `3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423` | composite current | `recover-current` | `dufs.yaml` |
@@ -78,7 +78,7 @@ Host/Sunshine current SQLite-only state
 ├─ verify-sqlite --product PRODUCT --input ABS [key options]
 ├─ restore-sqlite --product PRODUCT --expect-version VERSION --input ABS --database ABS
 │  [--replace-existing] [key options]
-└─ recover-sqlite --product host-monitoring --expect-version 0.7.0
+└─ recover-sqlite --product host-monitoring --expect-version 0.8.0
    --recovery ABS --action commit|rollback
 ```
 

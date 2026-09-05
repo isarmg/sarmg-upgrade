@@ -64,16 +64,16 @@ sarmg-upgrade recover-media-restore \
 sarmg-upgrade backup-sqlite \
   --product host-monitoring \
   --database /var/lib/isarmg/host-monitoring/db/host-monitoring.sqlite3 \
-  --output /srv/backup/host-monitoring-0.7.0-20260830
+  --output /srv/backup/host-monitoring-0.8.0-20260830
 
 sarmg-upgrade verify-sqlite \
   --product host-monitoring \
-  --input /srv/backup/host-monitoring-0.7.0-20260830
+  --input /srv/backup/host-monitoring-0.8.0-20260830
 
 sarmg-upgrade restore-sqlite \
   --product host-monitoring \
-  --expect-version 0.7.0 \
-  --input /srv/backup/host-monitoring-0.7.0-20260830 \
+  --expect-version 0.8.0 \
+  --input /srv/backup/host-monitoring-0.8.0-20260830 \
   --database /var/lib/isarmg/host-monitoring/db/host-monitoring.sqlite3 \
   --replace-existing
 ```
@@ -83,7 +83,7 @@ Host restore 中断可显式恢复：
 ```bash
 sarmg-upgrade recover-sqlite \
   --product host-monitoring \
-  --expect-version 0.7.0 \
+  --expect-version 0.8.0 \
   --recovery /exact/path/from/error \
   --action commit
 ```
@@ -142,7 +142,7 @@ AES-256-GCM envelope 使用 12-byte nonce，并严格校验产品域、对象 ID
 
 ## 9. 正式发行
 
-annotated `v0.2.0` 触发构建和发布两阶段：完整 Rust 门禁，暂存 source-bound binary、support/catalog、
+annotated `v0.3.0` 触发构建和发布两阶段：完整 Rust 门禁，暂存 source-bound binary、support/catalog、
 CycloneDX SBOM、环境和 provenance；发布 job 不 checkout source，签名 `SHA256SUMS`，解包复验后发布固定
 `.tar.zst` 和 outer digest。已有 tag/release/asset 不覆盖。发布验收必须确认 binary 输出没有历史 edge。
 
@@ -218,7 +218,7 @@ sarmg-upgrade catalog --json
 | 产品 | version | revision | canonical schema SHA-256 | 当前能力 |
 |---|---:|---:|---|---|
 | Media Backup | `0.2.0` | 1 | `2563e6afc3fff272d02b7a5615272cc773862243bfd15aec51655abf1d9c6b1c` | composite backup/verify/restore/recover |
-| Host Monitoring | `0.7.0` | 1 | `12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05` | SQLite backup/verify/restore/recover |
+| Host Monitoring | `0.8.0` | 1 | `12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05` | SQLite backup/verify/restore/recover |
 | Sunshine Manager | `0.8.0` | 2 | `c9dedb33dd7a5ad613e762eb135a7aa5184ce1df52166459bee7b3485b4b3be3` | keyed SQLite backup/verify/restore；无 recover |
 | Sentinel Monitor | `0.2.0` | 1 | `f547ddc817d830d23b5305bb1f88b29898d6531568edd6eb194c2b629eb560c0` | DB/recordings/三个配置/key 组合 backup/verify/restore/recover |
 | Dufs RAM | `0.50.1` | 1 | `3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423` | DB/shared root/`dufs.yaml` 组合 backup/verify/restore/recover |

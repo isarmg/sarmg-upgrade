@@ -3,7 +3,7 @@ name: Formal release
 on:
   push:
     tags:
-      - v0.2.0
+      - v0.3.0
 
 permissions: {}
 
@@ -79,6 +79,6 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
-            --title "sarmg-upgrade 0.2.0" \
+            --title "sarmg-upgrade 0.3.0" \
             --generate-notes \
             "$RUNNER_TEMP/final-release/"*

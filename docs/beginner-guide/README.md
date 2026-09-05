@@ -43,7 +43,7 @@ catalog。Foundation 没有 runtime state，所以 catalog 中存在但没有 ba
 ## 4. 当前实现范围
 
 Media Backup `0.2.0`、Sentinel Monitor `0.2.0` 和 Dufs RAM `0.50.1` 支持严格组合备份；
-Host Monitoring `0.7.0` 和 Sunshine Manager `0.8.0` 支持严格 SQLite-only 备份。所有历史升级 edge 均未实现。
+Host Monitoring `0.8.0` 和 Sunshine Manager `0.8.0` 支持严格 SQLite-only 备份。所有历史升级 edge 均未实现。
 自动化必须读取 `support --json`，不能根据 catalog 或本文推断命令。
 
 ## 5. 为什么先复制再解析
@@ -93,7 +93,7 @@ envelope version/Hash 要求。备份验证和恢复时重新提供受保护 key
 | 产品 | 当前 adapter | current identity | recover 边界 |
 |---|---|---|---|
 | Media Backup | SQLite + data tree 组合 adapter | `0.2.0` / r1 / `2563e6afc3fff272d02b7a5615272cc773862243bfd15aec51655abf1d9c6b1c` | 支持显式 commit/rollback |
-| Host Monitoring | SQLite-only adapter | `0.7.0` / r1 / `12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05` | 支持显式 commit/rollback |
+| Host Monitoring | SQLite-only adapter | `0.8.0` / r1 / `12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05` | 支持显式 commit/rollback |
 | Sunshine Manager | keyed SQLite-only adapter | `0.8.0` / r2 / `c9dedb33dd7a5ad613e762eb135a7aa5184ce1df52166459bee7b3485b4b3be3` | restore 可执行，但 recover 未对外支持 |
 | Sentinel Monitor | DB/recordings/三配置/key 组合 adapter | `0.2.0` / r1 / `f547ddc817d830d23b5305bb1f88b29898d6531568edd6eb194c2b629eb560c0` | `recover-current` commit/rollback |
 | Dufs RAM | DB/shared root/`dufs.yaml` 组合 adapter | `0.50.1` / r1 / `3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423` | `recover-current` commit/rollback |

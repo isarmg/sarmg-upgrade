@@ -3,7 +3,7 @@
 ## 1. 当前流程树
 
 ```text
-sarmg-upgrade 0.2.0
+sarmg-upgrade 0.3.0
 ├─ 平台：仅 x86_64-unknown-linux-gnu 离线 CLI；无 Server、无前端
 ├─ 能力发现
 │  ├─ support --json
@@ -15,7 +15,7 @@ sarmg-upgrade 0.2.0
 │  ├─ restore-media
 │  └─ recover-media-restore
 ├─ 当前 SQLite-only 状态
-│  ├─ Host Monitoring 0.7.0：backup / verify / restore / recover
+│  ├─ Host Monitoring 0.8.0：backup / verify / restore / recover
 │  └─ Sunshine Manager 0.8.0：keyed backup / verify / restore
 ├─ 当前组合状态
 │  ├─ Sentinel Monitor 0.2.0：DB / recordings / 三个配置 / key
@@ -173,7 +173,7 @@ clean checkout + annotated exact tag
 | `backup-sqlite` | 仅 Host/Sunshine current | `create_sqlite_backup*` | online snapshot、identity、hash；Sunshine 还证明密文可认证 | Media/Sentinel/Dufs 已完整备份 |
 | `verify-sqlite` | 仅 Host/Sunshine current backup | `verify_sqlite_backup*` | exact 两文件目录、manifest、DB、key 合同 | 目标路径可安全 replace |
 | `restore-sqlite` | Host/Sunshine exact expect-version | `restore_sqlite_backup*` | 当前 DB 已按 durable journal 安装并验证 | Sunshine 中断 recovery 已受支持 |
-| `recover-sqlite` | 仅 Host 0.7.0 | `recover_sqlite_restore` | original/incoming 位置和 hash 可证明后完成动作 | 可用于 Sunshine 或其他产品 |
+| `recover-sqlite` | 仅 Host 0.8.0 | `recover_sqlite_restore` | original/incoming 位置和 hash 可证明后完成动作 | 可用于 Sunshine 或其他产品 |
 
 CLI 不读取运行时配置文件，也没有环境变量 fallback。仓库因此没有空的 `config/`、`deploy/` 或 `clients/`：
 这不是遗漏，而是离线 CLI 当前边界。若未来增加常驻 Server 或前端，必须作为新的产品面重新设计，不能把
@@ -200,7 +200,7 @@ CLI 不读取运行时配置文件，也没有环境变量 fallback。仓库因�
 | 产品 | version | revision | schema SHA-256 |
 |---|---:|---:|---|
 | Media Backup | `0.2.0` | 1 | `2563e6afc3fff272d02b7a5615272cc773862243bfd15aec51655abf1d9c6b1c` |
-| Host Monitoring | `0.7.0` | 1 | `12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05` |
+| Host Monitoring | `0.8.0` | 1 | `12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05` |
 | Sunshine Manager | `0.8.0` | 2 | `c9dedb33dd7a5ad613e762eb135a7aa5184ce1df52166459bee7b3485b4b3be3` |
 | Sentinel Monitor | `0.2.0` | 1 | `f547ddc817d830d23b5305bb1f88b29898d6531568edd6eb194c2b629eb560c0` |
 | Dufs RAM | `0.50.1` | 1 | `3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423` |

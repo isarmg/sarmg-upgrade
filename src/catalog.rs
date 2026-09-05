@@ -35,7 +35,7 @@ impl Product {
             Self::SunshineManager => "sunshine-manager",
             Self::SentinelMonitor => "sentinel-monitor",
             Self::DufsRam => "dufs-ram",
-            Self::SarmgFoundation => "sarmg-foundation",
+            Self::SarmgFoundation => "sarmg-foundation-server",
         }
     }
 
