@@ -156,3 +156,5 @@ sarmg-upgrade catalog --json
 - [备份、恢复、安全与发行运维](docs/operations.md)
 
 代码采用 [Apache License 2.0](LICENSE-APACHE)。
+
+Dufs 0.51.0 暂不支持，详见[Axum 迁移支持边界](docs/dufs-axum-support-boundary.md)。现有 0.50.1 支持声明不适用于新版本。
