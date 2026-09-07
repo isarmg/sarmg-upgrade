@@ -59,7 +59,7 @@ canonical 算法重算、核对 metadata、同步 Upgrade code allowlist 与 fix
 1. 从产品 current 代码固定 canonical slug、version、revision、schema SHA 和完整持久资源合同。
 2. 判断能否使用 SQLite-only；只要还有 tree/config/recordings/companion 就必须专用 composite adapter。
 3. 取得可信 current fixture，先实现只读 identity 与业务不变量 validator。
-4. 明确服务/companion/Agent/Secret 哪些在 generation 内，定义 canonical lock 顺序。
+4. 明确服务/companion/Client/Secret 哪些在 generation 内，定义 canonical lock 顺序。
 5. 实现 pending + snapshot/copy + manifest-last + fsync + no-clobber backup。
 6. 实现读取所有资源字节的 full verify，而不只 parse manifest。
 7. 实现同文件系统 stage、durable journal、original preserve、install、installed verify。

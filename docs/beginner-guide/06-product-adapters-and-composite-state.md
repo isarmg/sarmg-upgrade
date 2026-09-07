@@ -34,7 +34,7 @@ exact 只有 DB、tree、manifest。BLAKE3 证明业务引用，SHA-256/inventor
 
 ## 6.4 Host Monitoring
 
-当前 Server 状态为 code-allowlisted SQLite，可使用受限 generic SQLite command。Agent 本地身份/Spool 不
+当前 Server 状态为 code-allowlisted SQLite，可使用受限 generic SQLite command。Client 本地身份/Spool 不
 自动包含在 Server backup。当前没有 Host 历史 edge。
 
 当前 exact identity 是 `0.8.0` / revision 1 /
@@ -42,9 +42,9 @@ exact 只有 DB、tree、manifest。BLAKE3 证明业务引用，SHA-256/inventor
 `backup-sqlite`、`verify-sqlite`、`restore-sqlite`，并且是 SQLite-only 产品中唯一公开
 `recover-sqlite` 的产品。
 
-这里的 Host 指 Server current database。`host-monitor` Agent 的设备身份、local config、spool 或诊断文件
-属于 Agent 自己的运行边界，不会因为 Server backup 成功而被灾备。运维若需要全系统恢复，必须另行记录
-Agent 重注册/重部署策略。
+这里的 Host 指 Server current database。`host-monitor` Client 的设备身份、local config、spool 或诊断文件
+属于 Client 自己的运行边界，不会因为 Server backup 成功而被灾备。运维若需要全系统恢复，必须另行记录
+Client 重注册/重部署策略。
 
 ## 6.5 Sunshine Manager
 
