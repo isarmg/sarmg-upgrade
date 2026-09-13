@@ -18,7 +18,8 @@ fixture。每套 SQLite fixture 都包含管理员、有效 Session、Unicode/�
 复算精确 Schema fingerprint 与外键完整性。Dufs 的静态管理员和内存 Session 另以配置及行为 Golden 文件
 表达。已退役的 Sunshine 0.7 夹具已删除；当前代码不包含历史 parser 或兼容路径。
 
-跨项目线协议来自 Foundation 0.4.0：`sarmg-contracts` 与 `sarmg-schema-identity` 均使用精确版本。
+跨项目线协议来自 Foundation 0.6.0：`sarmg-contracts` 与 `sarmg-schema-identity` 均使用精确版本，固定
+revision `1e889d08fa69fcf2b5fffe45e8cc42b68218f4f1`。
 `sarmg-contracts` 是当前 backup manifest、资源类别和
 `SchemaIdentity` 的唯一 Rust 线类型，`sarmg-schema-identity` 是 `product_metadata` 形状、schema row
 查询及 SHA-256 framing 的唯一算法实现。本仓库只实现 rusqlite 读取适配器和更严格的产品策略，例如精确

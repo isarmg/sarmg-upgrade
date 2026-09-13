@@ -155,8 +155,8 @@ Secret；不得同时接受新旧两把 key，也不得从下载归档本身建�
 
 Foundation 依赖是发布输入而不是运行时服务。发行前另行核对：
 
-1. `sarmg-contracts` 与 `sarmg-schema-identity` 均精确为 `=0.4.0`，Git rev 精确为
-   `0e1be10273fd6abf72e0d0eeb24cbb1120572486`；
+1. `sarmg-contracts` 与 `sarmg-schema-identity` 均精确为 `=0.6.0`，Git rev 精确为
+   `1e889d08fa69fcf2b5fffe45e8cc42b68218f4f1`；
 2. `Cargo.lock` 中没有第二版本，也没有 registry/path fallback 或可漂移 branch；
 3. `cargo test --locked --all-targets --all-features` 覆盖 shared manifest parser、metadata column/row adapter、
    schema fingerprint 和本仓库产品级负例；
@@ -279,7 +279,8 @@ Media 的 DB/tree 必须同时不存在或同时存在；混合代在 mutation �
 
 ## 16. Recovery 决策矩阵
 
-Media 只接受 current journal v2（最大 1 MiB），不兼容 v1。v2 把 tool/product/version/adapter/Schema/time、
+Media 只接受 current journal v2，不兼容 v1。读写共用 272 MiB 硬上限，可覆盖两个已验收最大树 inventory
+与固定元数据；完整序列化结果会在创建 journal 或替换任何目标前检查，超限时目标保持不变。v2 把 tool/product/version/adapter/Schema/time、
 source backup 规范路径+inode/path identity、manifest version/time/bytes/SHA、source tree identity、database/tree
 目标及父路径 identity、同 nonce 精确推导的 stage/original、incoming/optional original 的 DB/tree 完整 inventory、
 空 configuration/external requirements 和 phase 绑定起来。`recover-media-restore` 仍要求操作者显式重给

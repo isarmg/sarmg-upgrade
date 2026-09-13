@@ -30,7 +30,13 @@ const TREE_DIRECTORY: &str = "tree";
 const CURRENT_MANIFEST_VERSION: u32 = 3;
 const CURRENT_RESTORE_JOURNAL_VERSION: u32 = 3;
 const MAX_MANIFEST_BYTES: u64 = 128 * 1024 * 1024;
-const MAX_CURRENT_JOURNAL_BYTES: u64 = 1024 * 1024;
+// A journal contains the accepted source manifest tree and, when replacing an
+// existing installation, one equally bounded original-tree inventory. Keep a
+// finite envelope for hostile/corrupt input, but size it from those contracts
+// instead of using the old unrelated 1 MiB limit. Every write is serialized and
+// checked against this same limit before the journal path is created or any
+// target replacement begins.
+const MAX_CURRENT_JOURNAL_BYTES: u64 = MAX_MANIFEST_BYTES * 2 + 16 * 1024 * 1024;
 const MAX_TREE_ENTRIES: u64 = 2_000_000;
 const MAX_TREE_DEPTH: usize = 128;
 
@@ -2448,16 +2454,33 @@ fn write_json_create_new(path: &Path, value: &impl Serialize) -> anyhow::Result<
 }
 
 fn write_journal(recovery: &Path, journal: &RestoreJournal) -> anyhow::Result<()> {
-    write_json_create_new(&recovery.join("restore-journal.json"), journal)?;
+    write_restore_journal_create_new(&recovery.join("restore-journal.json"), journal)?;
     File::open(recovery)?.sync_all()?;
     Ok(())
 }
 
 fn replace_journal(recovery: &Path, journal: &RestoreJournal) -> anyhow::Result<()> {
     let pending = recovery.join("restore-journal.pending");
-    write_json_create_new(&pending, journal)?;
+    write_restore_journal_create_new(&pending, journal)?;
     fs::rename(&pending, recovery.join("restore-journal.json"))?;
     File::open(recovery)?.sync_all()?;
+    Ok(())
+}
+
+fn write_restore_journal_create_new(path: &Path, journal: &RestoreJournal) -> anyhow::Result<()> {
+    let mut bytes = serde_json::to_vec_pretty(journal)?;
+    bytes.push(b'\n');
+    ensure!(
+        bytes.len() as u64 <= MAX_CURRENT_JOURNAL_BYTES,
+        "current restore journal exceeds its read/write limit"
+    );
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)?;
+    file.write_all(&bytes)?;
+    file.sync_all()?;
     Ok(())
 }
 
@@ -2976,6 +2999,28 @@ mod tests {
             .configuration
             .push(test_current_file("handwritten.conf"));
         assert!(validate_restore_journal(&configuration, &recovery).is_err());
+    }
+
+    #[test]
+    fn restore_journal_writer_and_reader_share_the_large_tree_limit() {
+        let root = tempfile::tempdir().unwrap();
+        let (recovery, mut journal) = test_restore_journal(root.path());
+        journal.incoming_tree.files = (0..10_000)
+            .map(|index| TreeFile {
+                path: format!("camera/{index:08}/{}", "segment".repeat(8)),
+                mode: 0o600,
+                bytes: 1,
+                sha256: format!("{index:064x}"),
+            })
+            .collect();
+        let encoded = serde_json::to_vec_pretty(&journal).unwrap();
+        assert!(encoded.len() as u64 > 1024 * 1024);
+        assert!(encoded.len() as u64 <= MAX_CURRENT_JOURNAL_BYTES);
+
+        write_journal(&recovery, &journal).unwrap();
+        let restored = read_restore_journal(&recovery).unwrap();
+        assert_eq!(restored.incoming_tree.files.len(), 10_000);
+        assert_eq!(restored.phase, RestorePhase::Prepared);
     }
 
     #[test]
