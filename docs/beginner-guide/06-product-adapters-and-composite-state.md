@@ -87,8 +87,8 @@ Dufs 的 data-plane 用户/文件所有者规则、protected YAML 和 shared roo
 Foundation 没有 runtime state；catalog 可说明这一事实，但不提供 backup/restore adapter。源码和 package
 发布由 Git/registry 流程管理，不能伪装成数据库备份。
 
-本工具依赖 Foundation `sarmg-contracts =0.4.0` 与 `sarmg-schema-identity =0.4.0`，两者 Git rev 都是
-`0e1be10273fd6abf72e0d0eeb24cbb1120572486`。这说明共享当前线类型和算法来自 Foundation；不表示 Foundation
+本工具依赖 Foundation `sarmg-contracts =0.6.0` 与 `sarmg-schema-identity =0.6.0`，两者 Git rev 都是
+`1e889d08fa69fcf2b5fffe45e8cc42b68218f4f1`。这说明共享当前线类型和算法来自 Foundation；不表示 Foundation
 是运行时服务，也不表示它替产品验证数据库。不得改用 workspace sibling、Cargo path dependency、可变
 branch 或本地副本，也不能在依赖不可用时复制一份旧类型作 fallback。
 
