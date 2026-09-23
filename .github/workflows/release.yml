@@ -31,7 +31,7 @@ jobs:
           test -f "docs/releases/${version}.md"
       - name: Install pinned Rust toolchain and target
         run: |
-          rustup toolchain install 1.98.0 --profile minimal
+          rustup toolchain install 1.98.0 --profile minimal --component rustfmt,clippy
           rustup target add x86_64-unknown-linux-gnu --toolchain 1.98.0
       - name: Install archive dependency
         run: sudo apt-get update && sudo apt-get install --yes zstd

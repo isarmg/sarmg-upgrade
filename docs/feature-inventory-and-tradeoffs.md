@@ -1,6 +1,6 @@
 # Sarmg Upgrade 完整功能与取舍清单
 
-本文描述 `sarmg-upgrade 0.3.1` 当前二进制实际提供的能力：明确版本的备份、严格校验、恢复、恢复日志和发布验证。支持矩阵中的 `upgrade_edges` 全部为空；工具不提供跨版本数据转换。
+本文描述 `sarmg-upgrade 0.3.2` 当前二进制实际提供的能力：明确版本的备份、严格校验、恢复、恢复日志和发布验证。支持矩阵中的 `upgrade_edges` 全部为空；工具不提供跨版本数据转换。
 
 正式工具唯一支持 Linux AMD64 GNU `x86_64-unknown-linux-gnu`。它是停机离线 CLI，不是 Server，也没有
 React/Vite 或其他前端；仓库当前无需运行时配置或服务部署，故不创建空 `config/`、`deploy/`、`clients/`。

@@ -3,7 +3,7 @@
 ## 1. 当前流程树
 
 ```text
-sarmg-upgrade 0.3.1
+sarmg-upgrade 0.3.2
 ├─ 平台：仅 x86_64-unknown-linux-gnu 离线 CLI；无 Server、无前端
 ├─ 能力发现
 │  ├─ support --json
