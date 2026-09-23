@@ -17,8 +17,10 @@ sarmg-upgrade catalog --json
 sarmg-upgrade inspect-manifest /backup/manifest.json
 ```
 
-`inspect-manifest` 仅读取不超过 1 MiB 的普通文件，拒绝末级符号链接；成功只证明 JSON 可按当前格式解析，不读取资源字节、SQLite 或 external key，不能替代
+`inspect-manifest` 只读取不超过 1 MiB 的普通文件，拒绝末级符号链接；成功表示 JSON 符合当前清单格式和产品资源声明约束，但不读取资源字节、SQLite 或 external key，不能替代
 `verify-*`。`catalog` 也不等于已实现支持。
+
+`verify-current` 和 `recover-current` 读取的组合备份清单与恢复日志也要求单硬链接普通文件，分别限制为 128 MiB 和 272 MiB。读取时核对打开的文件身份、长度和修改时间；若文件变化，操作失败并保留现有状态。
 
 ## 3. Media Backup 当前组合备份
 

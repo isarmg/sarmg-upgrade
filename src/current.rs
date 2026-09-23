@@ -703,16 +703,8 @@ pub fn recover_current(options: &CurrentRecoveryOptions) -> anyhow::Result<Curre
 fn read_restore_journal(recovery: &Path) -> anyhow::Result<RestoreJournal> {
     validate_recovery_directory_entries(recovery)?;
     let path = recovery.join("restore-journal.json");
-    let metadata = fs::symlink_metadata(&path)?;
-    ensure!(
-        metadata.is_file() && metadata.nlink() == 1 && metadata.len() <= MAX_CURRENT_JOURNAL_BYTES,
-        "current restore journal is not a bounded single-link regular file"
-    );
-    let bytes = fs::read(&path)?;
-    ensure!(
-        bytes.len() as u64 <= MAX_CURRENT_JOURNAL_BYTES,
-        "current restore journal is too large"
-    );
+    let bytes = read_bounded_single_link_file(&path, MAX_CURRENT_JOURNAL_BYTES)
+        .context("read current restore journal")?;
     Ok(serde_json::from_slice(&bytes)?)
 }
 
@@ -2343,14 +2335,47 @@ impl ProductLocks {
 }
 
 fn read_manifest(directory: &Path) -> anyhow::Result<CurrentBackupManifest> {
-    let metadata = fs::symlink_metadata(directory.join(MANIFEST_FILE))?;
+    let bytes = read_bounded_single_link_file(&directory.join(MANIFEST_FILE), MAX_MANIFEST_BYTES)
+        .context("read current backup manifest")?;
+    Ok(serde_json::from_slice(&bytes)?)
+}
+
+fn read_bounded_single_link_file(path: &Path, limit: u64) -> anyhow::Result<Vec<u8>> {
+    let descriptor = rustix::fs::open(
+        path,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NONBLOCK
+            | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::empty(),
+    )?;
+    let mut file = File::from(descriptor);
+    let initial = file.metadata()?;
     ensure!(
-        metadata.is_file() && metadata.nlink() == 1 && metadata.len() <= MAX_MANIFEST_BYTES,
-        "backup manifest is not a bounded regular file"
+        initial.is_file() && initial.nlink() == 1 && initial.len() <= limit,
+        "state document is not a bounded single-link regular file"
     );
-    Ok(serde_json::from_slice(&fs::read(
-        directory.join(MANIFEST_FILE),
-    )?)?)
+    let mut bytes = Vec::new();
+    Read::by_ref(&mut file)
+        .take(limit + 1)
+        .read_to_end(&mut bytes)?;
+    let final_metadata = file.metadata()?;
+    let named = fs::symlink_metadata(path)?;
+    ensure!(
+        bytes.len() as u64 == initial.len()
+            && final_metadata.dev() == initial.dev()
+            && final_metadata.ino() == initial.ino()
+            && final_metadata.len() == initial.len()
+            && final_metadata.mtime() == initial.mtime()
+            && final_metadata.mtime_nsec() == initial.mtime_nsec()
+            && named.is_file()
+            && named.nlink() == 1
+            && named.dev() == initial.dev()
+            && named.ino() == initial.ino()
+            && bytes.len() as u64 <= limit,
+        "state document changed while it was read or exceeds its size limit"
+    );
+    Ok(bytes)
 }
 
 fn verify_current_backup_root(directory: &Path) -> anyhow::Result<()> {
@@ -2952,6 +2977,39 @@ mod tests {
         fs::remove_file(backup.join(DATABASE_FILE)).unwrap();
         fs::create_dir(backup.join(DATABASE_FILE)).unwrap();
         assert!(verify_current_backup_root(&backup).is_err());
+    }
+
+    #[test]
+    fn current_state_documents_require_bounded_single_link_files() {
+        let root = tempfile::tempdir().unwrap();
+        let backup = root.path().join("backup");
+        create_exact_backup_root(&backup);
+        let manifest_path = backup.join(MANIFEST_FILE);
+        assert_eq!(read_manifest(&backup).unwrap(), test_manifest());
+
+        let second_link = root.path().join("manifest-link.json");
+        fs::hard_link(&manifest_path, &second_link).unwrap();
+        assert!(read_manifest(&backup).is_err());
+        fs::remove_file(&second_link).unwrap();
+
+        fs::remove_file(&manifest_path).unwrap();
+        symlink(&second_link, &manifest_path).unwrap();
+        assert!(read_manifest(&backup).is_err());
+        fs::remove_file(&manifest_path).unwrap();
+
+        let oversized = File::create(&manifest_path).unwrap();
+        oversized.set_len(MAX_MANIFEST_BYTES + 1).unwrap();
+        assert!(read_manifest(&backup).is_err());
+
+        let (recovery, journal) = test_restore_journal(root.path());
+        write_journal(&recovery, &journal).unwrap();
+        let parsed = read_restore_journal(&recovery).unwrap();
+        assert_eq!(parsed.source_backup, journal.source_backup);
+        assert_eq!(parsed.phase, journal.phase);
+        let journal_path = recovery.join("restore-journal.json");
+        let second_link = root.path().join("journal-link.json");
+        fs::hard_link(&journal_path, &second_link).unwrap();
+        assert!(read_restore_journal(&recovery).is_err());
     }
 
     #[test]

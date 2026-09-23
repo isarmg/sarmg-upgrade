@@ -21,10 +21,8 @@ pub use sarmg_contracts::{
 pub const MANIFEST_VERSION: u8 = BACKUP_MANIFEST_VERSION;
 pub const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 
-/// Foundation 定义线上的通用备份清单；本包装只叠加本工具拥有的产品策略。
-///
-/// 这样 JSON 字段、数值边界和基础类型只有一个实现，同时仍由本仓库拒绝
-/// 错产品、危险路径、重复资源和不符合当前产品要求的外部密钥声明。
+/// 使用 Foundation 的严格清单格式，并验证本工具支持的产品、资源路径、
+/// 资源唯一性与外部密钥声明。
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct BackupManifest(ContractBackupManifest);

@@ -18,8 +18,7 @@ struct Cli {
     command: Command,
 }
 
-/// 只暴露支持矩阵所列当前版本的备份、校验与恢复命令。
-/// 历史升级边仅在形成独立、可审计的适配器后加入。
+/// 暴露支持矩阵所列当前状态的备份、校验、恢复和中断恢复命令。
 #[derive(Debug, Subcommand)]
 enum Command {
     Support {
