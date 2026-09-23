@@ -8,12 +8,10 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use aes_gcm::{
-    Aes256Gcm, Nonce,
-    aead::{Aead, KeyInit},
-};
 use anyhow::{Context, ensure};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use hkdf::Hkdf;
+use hmac::{Hmac, Mac};
 use rusqlite::{Connection, OpenFlags, backup::Backup as SqliteBackup};
 use rustix::{
     fs::{
@@ -22,13 +20,13 @@ use rustix::{
     },
     io::Errno,
 };
-#[cfg(test)]
-use sarmg_schema_identity::PRODUCT_METADATA_DDL;
 use sarmg_schema_identity::{
     ProductMetadataColumn, ProductMetadataRow, SQLITE_SCHEMA_ROWS_QUERY, SchemaRow,
     schema_fingerprint as canonical_schema_fingerprint, schema_identity_from_metadata_rows,
     validate_product_metadata_columns,
 };
+use sarmg_secret::SecretKey;
+use sarmg_secret_envelope::EnvelopeDomain;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -46,14 +44,14 @@ pub use restore::{
 const DATABASE_FILE: &str = "database.sqlite3";
 const MANIFEST_FILE: &str = "manifest.json";
 const MAX_CREDENTIAL_KEY_BYTES: u64 = 4096;
-pub(crate) const HOST_CURRENT_APPLICATION_VERSION: &str = "0.8.0";
-pub(super) const HOST_CURRENT_SCHEMA_REVISION: u64 = 1;
+pub(crate) const HOST_CURRENT_APPLICATION_VERSION: &str = "0.9.26";
+pub(super) const HOST_CURRENT_SCHEMA_REVISION: u64 = 7;
 pub(super) const HOST_CURRENT_SCHEMA_SHA256: &str =
-    "12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05";
-pub(crate) const SUNSHINE_CURRENT_APPLICATION_VERSION: &str = "0.8.0";
-pub(super) const SUNSHINE_CURRENT_SCHEMA_REVISION: u64 = 2;
+    "5c4a32f3f1813e6e6ef528b55e25e912bfe0191f79332ad5538943746c8f17a3";
+pub(crate) const SUNSHINE_CURRENT_APPLICATION_VERSION: &str = "0.10.1";
+pub(super) const SUNSHINE_CURRENT_SCHEMA_REVISION: u64 = 7;
 pub(super) const SUNSHINE_CURRENT_SCHEMA_SHA256: &str =
-    "c9dedb33dd7a5ad613e762eb135a7aa5184ce1df52166459bee7b3485b4b3be3";
+    "1acc8f2d9fac7ec4e973dd7e43cf5099e4a0b713b58a59e4969797602030d5d2";
 
 pub(super) fn official_sqlite_identity(product: Product) -> anyhow::Result<SchemaIdentity> {
     require_sqlite_only_product(product)?;
@@ -299,7 +297,7 @@ fn sunshine_external_requirement(key_id: &str, key: &[u8; 32]) -> ExternalRequir
         kind: "credentials-key".to_owned(),
         kid: key_id.to_owned(),
         sha256: lower_hex(&Sha256::digest(key)),
-        algorithm: "aes-256-gcm".to_owned(),
+        algorithm: "sarmg-secret-envelope-aes-256-gcm".to_owned(),
         envelope_version: 1,
     }
 }
@@ -376,38 +374,144 @@ pub(super) fn verify_sunshine_encrypted_values(
     key: &[u8; 32],
 ) -> anyhow::Result<()> {
     let connection = open_read_only(database)?;
-    let cipher = Aes256Gcm::new_from_slice(key).expect("32-byte Sunshine key");
-    for (table, column, require_json) in [
-        ("hosts", "secret", false),
-        ("operations", "request_ciphertext", true),
-    ] {
-        let sql = format!("SELECT {column} FROM {table} WHERE {column} IS NOT NULL ORDER BY rowid");
-        let mut statement = connection.prepare(&sql)?;
-        let values = statement.query_map([], |row| row.get::<_, String>(0))?;
-        for value in values {
-            let value = value?;
-            let prefix = format!("sunshine:v1:{key_id}:");
-            let encoded = value
-                .strip_prefix(&prefix)
-                .context("Sunshine ciphertext key id or envelope version mismatch")?;
-            let payload = STANDARD
-                .decode(encoded)
-                .context("Sunshine ciphertext is not canonical base64")?;
-            ensure!(payload.len() > 12, "Sunshine ciphertext is truncated");
-            let plaintext = cipher
-                .decrypt(Nonce::from_slice(&payload[..12]), &payload[12..])
-                .map_err(|_| {
-                    anyhow::anyhow!("credentials key cannot authenticate Sunshine encrypted state")
-                })?;
-            if require_json {
-                serde_json::from_slice::<serde_json::Value>(&plaintext)
-                    .context("Sunshine operation ciphertext does not contain JSON")?;
-            } else {
-                String::from_utf8(plaintext).context("Sunshine host credential is not UTF-8")?;
-            }
+    ensure!(
+        !key_id.is_empty()
+            && key_id.len() <= 64
+            && key_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')),
+        "Sunshine credentials key ID is invalid"
+    );
+    let master = SecretKey::new(*key);
+    let mut statement = connection.prepare(
+        "SELECT device_id, authorization_code_enc, enrollment_hash FROM devices ORDER BY device_id",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<Vec<u8>>>(2)?,
+        ))
+    })?;
+    for row in rows {
+        let (device_id, encrypted, enrollment_hash) = row?;
+        let code = open_sunshine_envelope::<SunshineClientAuthorization>(
+            &master,
+            key_id,
+            device_id.as_bytes(),
+            &encrypted,
+        )?;
+        ensure!(
+            code.len() == 36
+                && code
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit()),
+            "Sunshine authorization code is invalid"
+        );
+        if let Some(stored_hash) = enrollment_hash {
+            ensure!(
+                stored_hash == Sha256::digest(code.as_bytes()).as_slice(),
+                "Sunshine authorization digest differs from encrypted value"
+            );
         }
     }
+    let derivation = Hkdf::<Sha256>::new(
+        Some(b"sunshine-manager:credential-master-key:hkdf-sha256:v1"),
+        key,
+    );
+    let mut fingerprint_key = [0_u8; 32];
+    derivation
+        .expand(
+            b"sunshine-manager:operation-request-fingerprint:hmac-sha256:v1",
+            &mut fingerprint_key,
+        )
+        .map_err(|_| anyhow::anyhow!("Sunshine fingerprint key derivation failed"))?;
+    let mut statement = connection.prepare(
+        "SELECT operation_id, action, request_payload, request_fingerprint FROM _sarmg_operations ORDER BY operation_id",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Vec<u8>>(2)?,
+            row.get::<_, Vec<u8>>(3)?,
+        ))
+    })?;
+    for row in rows {
+        let (operation_id, action, payload, expected_fingerprint) = row?;
+        let value: serde_json::Value =
+            serde_json::from_slice(&payload).context("Sunshine operation payload is invalid")?;
+        let ciphertext = value
+            .get("request_ciphertext")
+            .and_then(serde_json::Value::as_str)
+            .context("Sunshine operation ciphertext is missing")?;
+        let binding = sunshine_operation_binding(&operation_id, &action);
+        let plaintext = open_sunshine_envelope::<SunshineOperationRequest>(
+            &master, key_id, &binding, ciphertext,
+        )?;
+        serde_json::from_str::<serde_json::Value>(&plaintext)
+            .context("Sunshine operation request is not JSON")?;
+        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&fingerprint_key)
+            .expect("SHA-256 HMAC accepts a 32-byte key");
+        mac.update(plaintext.as_bytes());
+        ensure!(
+            expected_fingerprint == mac.finalize().into_bytes().as_slice(),
+            "Sunshine operation request fingerprint differs from encrypted value"
+        );
+    }
     Ok(())
+}
+
+struct SunshineClientAuthorization;
+impl EnvelopeDomain for SunshineClientAuthorization {
+    const DOMAIN: &'static [u8] = b"sunshine-manager/client-authorization";
+    const REVISION: u16 = 1;
+}
+
+struct SunshineOperationRequest;
+impl EnvelopeDomain for SunshineOperationRequest {
+    const DOMAIN: &'static [u8] = b"sunshine-manager/operation-request";
+    const REVISION: u16 = 1;
+}
+
+fn open_sunshine_envelope<D: EnvelopeDomain>(
+    key: &SecretKey<32>,
+    key_id: &str,
+    binding: &[u8],
+    encoded: &str,
+) -> anyhow::Result<String> {
+    let prefix = format!("sunshine:sgev1:{key_id}:");
+    let payload = encoded
+        .strip_prefix(&prefix)
+        .context("Sunshine ciphertext key ID or version is invalid")?;
+    let bytes = STANDARD
+        .decode(payload)
+        .context("Sunshine ciphertext is not base64")?;
+    ensure!(
+        STANDARD.encode(&bytes) == payload,
+        "Sunshine ciphertext is not canonical base64"
+    );
+    let plaintext = sarmg_secret_envelope::open::<D>(key, binding, &bytes).map_err(|_| {
+        anyhow::anyhow!("credentials key cannot authenticate Sunshine encrypted state")
+    })?;
+    Ok(std::str::from_utf8(plaintext.expose())
+        .context("Sunshine encrypted value is not UTF-8")?
+        .to_owned())
+}
+
+fn sunshine_operation_binding(operation_id: &str, action: &str) -> Vec<u8> {
+    let mut binding = Vec::new();
+    for value in [
+        b"sunshine-manager:aes-256-gcm:aad:v1".as_slice(),
+        b"operation-request",
+        operation_id.as_bytes(),
+        action.as_bytes(),
+        b"request_ciphertext",
+    ] {
+        binding.extend_from_slice(&(value.len() as u64).to_be_bytes());
+        binding.extend_from_slice(value);
+    }
+    binding
 }
 
 fn verify_official_sqlite_database(
@@ -980,9 +1084,6 @@ mod tests {
             .pragma_update(None, "foreign_keys", "ON")
             .unwrap();
         connection.execute_batch(schema).unwrap();
-        if product == Product::HostMonitoring {
-            connection.execute_batch(PRODUCT_METADATA_DDL).unwrap();
-        }
         let fingerprint = schema_fingerprint_connection(&connection).unwrap();
         assert_eq!(fingerprint, official.schema_sha256);
         connection
@@ -1055,10 +1156,10 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let database = root.path().join("source.sqlite3");
         let output = root.path().join("backup");
-        create_current_database(&database, Product::HostMonitoring, "0.8.0");
+        create_current_database(&database, Product::HostMonitoring, "0.9.26");
 
         let backup = create_sqlite_backup(Product::HostMonitoring, &database, &output).unwrap();
-        assert_eq!(backup.manifest.application_version, "0.8.0");
+        assert_eq!(backup.manifest.application_version, "0.9.26");
         verify_sqlite_backup(Product::HostMonitoring, &output).unwrap();
 
         insert_test_record(&database, Product::HostMonitoring, "later");
@@ -1099,7 +1200,7 @@ mod tests {
         );
 
         let wrong_revision = root.path().join("wrong-revision.sqlite3");
-        create_current_database(&wrong_revision, Product::HostMonitoring, "0.8.0");
+        create_current_database(&wrong_revision, Product::HostMonitoring, "0.9.26");
         Connection::open(&wrong_revision)
             .unwrap()
             .execute("UPDATE product_metadata SET schema_revision=2", [])
@@ -1111,7 +1212,7 @@ mod tests {
         );
 
         let unknown_schema = root.path().join("unknown-schema.sqlite3");
-        create_current_database(&unknown_schema, Product::HostMonitoring, "0.8.0");
+        create_current_database(&unknown_schema, Product::HostMonitoring, "0.9.26");
         let connection = Connection::open(&unknown_schema).unwrap();
         connection
             .execute_batch("CREATE TABLE internally_consistent_unknown (id INTEGER PRIMARY KEY);")
@@ -1137,7 +1238,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let database = root.path().join("host.sqlite3");
         let backup = root.path().join("backup");
-        create_current_database(&database, Product::HostMonitoring, "0.8.0");
+        create_current_database(&database, Product::HostMonitoring, "0.9.26");
         create_sqlite_backup(Product::HostMonitoring, &database, &backup).unwrap();
 
         assert!(verify_sqlite_backup(Product::SunshineManager, &backup).is_err());
@@ -1154,7 +1255,7 @@ mod tests {
 
         let mut cross_product: serde_json::Value = serde_json::from_slice(&original).unwrap();
         cross_product["product"] = serde_json::json!("sunshine-manager");
-        cross_product["application_version"] = serde_json::json!("0.8.0");
+        cross_product["application_version"] = serde_json::json!("0.9.26");
         cross_product["schema_identity"]["application"] = serde_json::json!("sunshine-manager");
         cross_product["schema_identity"]["schema_sha256"] =
             serde_json::json!(SUNSHINE_CURRENT_SCHEMA_SHA256);
@@ -1185,7 +1286,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let database = root.path().join("source.sqlite3");
         let output = root.path().join("backup");
-        create_current_database(&database, Product::SunshineManager, "0.8.0");
+        create_current_database(&database, Product::SunshineManager, "0.10.1");
         fs::create_dir(&output).unwrap();
         fs::write(output.join("keep"), b"unchanged").unwrap();
         assert!(create_sqlite_backup(Product::SunshineManager, &database, &output).is_err());
@@ -1240,7 +1341,7 @@ mod tests {
         let database = root.path().join("source.sqlite3");
         let first = root.path().join("first");
         let second = root.path().join("second");
-        create_current_database(&database, Product::HostMonitoring, "0.8.0");
+        create_current_database(&database, Product::HostMonitoring, "0.9.26");
         create_sqlite_backup(Product::HostMonitoring, &database, &first).unwrap();
         fs::write(first.join("unexpected"), b"no").unwrap();
         assert!(verify_sqlite_backup(Product::HostMonitoring, &first).is_err());
@@ -1264,7 +1365,7 @@ mod tests {
         let real = root.path().join("real");
         fs::create_dir(&real).unwrap();
         let database = real.join("source.sqlite3");
-        create_current_database(&database, Product::HostMonitoring, "0.8.0");
+        create_current_database(&database, Product::HostMonitoring, "0.9.26");
         hard_link(&database, real.join("alias.sqlite3")).unwrap();
         assert!(
             create_sqlite_backup(
@@ -1292,7 +1393,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let database = root.path().join("source.sqlite3");
         let output = root.path().join("backup");
-        create_current_database(&database, Product::HostMonitoring, "0.8.0");
+        create_current_database(&database, Product::HostMonitoring, "0.9.26");
         Connection::open(&database)
             .unwrap()
             .execute_batch("CREATE TABLE schema_drift (id INTEGER PRIMARY KEY);")
@@ -1307,7 +1408,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let database = root.path().join("source.sqlite3");
         let output = root.path().join("backup");
-        create_current_database(&database, Product::HostMonitoring, "0.8.0");
+        create_current_database(&database, Product::HostMonitoring, "0.9.26");
         let location = DatabaseLocation::resolve(&database).unwrap();
         let exclusive = location
             .acquire_lock(

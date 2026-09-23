@@ -733,6 +733,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "sarmg-secret"
+version = "0.9.1"
+source = "git+https://github.com/isarmg/sarmg-foundation-server.git?rev=84966364c5b4662104e05741b3045482e4fd4fc8#84966364c5b4662104e05741b3045482e4fd4fc8"
+dependencies = [
+ "zeroize",
+]
+
+[[package]]
+name = "sarmg-secret-envelope"
+version = "0.9.1"
+source = "git+https://github.com/isarmg/sarmg-foundation-server.git?rev=84966364c5b4662104e05741b3045482e4fd4fc8#84966364c5b4662104e05741b3045482e4fd4fc8"
+dependencies = [
+ "aes-gcm",
+ "getrandom 0.4.3",
+ "hkdf",
+ "sarmg-secret",
+ "sha2",
+ "thiserror",
+ "zeroize",
+]
+
+[[package]]
 name = "sarmg-upgrade"
 version = "0.3.0"
 dependencies = [
@@ -743,11 +765,14 @@ dependencies = [
  "blake3",
  "clap",
  "hkdf",
+ "hmac",
  "rand",
  "rusqlite",
  "rustix",
  "sarmg-contracts",
  "sarmg-schema-identity",
+ "sarmg-secret",
+ "sarmg-secret-envelope",
  "serde",
  "serde_json",
  "serde_yaml_ng",
@@ -1051,6 +1076,12 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
+
+[[package]]
+name = "zeroize"
+version = "1.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
 
 [[package]]
 name = "zmij"

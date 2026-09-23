@@ -16,9 +16,12 @@ base64 = "0.22"
 blake3 = "1"
 clap = { version = "4.5", features = ["derive"] }
 hkdf = "0.12"
+hmac = "0.12"
 rand = "0.8"
 sarmg-contracts = { git = "https://github.com/isarmg/sarmg-foundation-server.git", rev = "84966364c5b4662104e05741b3045482e4fd4fc8", version = "=0.9.1" }
 sarmg-schema-identity = { git = "https://github.com/isarmg/sarmg-foundation-server.git", rev = "84966364c5b4662104e05741b3045482e4fd4fc8", version = "=0.9.1" }
+sarmg-secret = { git = "https://github.com/isarmg/sarmg-foundation-server.git", rev = "84966364c5b4662104e05741b3045482e4fd4fc8", version = "=0.9.1" }
+sarmg-secret-envelope = { git = "https://github.com/isarmg/sarmg-foundation-server.git", rev = "84966364c5b4662104e05741b3045482e4fd4fc8", version = "=0.9.1" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = { package = "serde_yaml_ng", version = "0.10" }
@@ -26,10 +29,8 @@ rusqlite = { version = "0.32", features = ["backup", "bundled"] }
 rustix = { version = "1.1", features = ["fs", "process", "time"] }
 sha2 = "0.10"
 thiserror = "2"
-uuid = { version = "1", features = ["v4"] }
-
-[dev-dependencies]
 tempfile = "3"
+uuid = { version = "1", features = ["v4"] }
 
 [profile.release]
 codegen-units = 1

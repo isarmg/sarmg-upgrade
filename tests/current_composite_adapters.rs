@@ -1,5 +1,6 @@
 use std::{
     fs,
+    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
 };
 
@@ -9,13 +10,20 @@ use sarmg_upgrade::{
     restore_current, verify_current_backup,
 };
 
-fn database(path: &Path, schema: &str, product: &str, version: &str, fingerprint: &str) {
+fn database(
+    path: &Path,
+    schema: &str,
+    product: &str,
+    version: &str,
+    revision: i64,
+    fingerprint: &str,
+) {
     let connection = Connection::open(path).unwrap();
     connection.execute_batch(schema).unwrap();
     connection
         .execute(
-            "INSERT INTO product_metadata VALUES(1,?1,?2,1,?3)",
-            (product, version, fingerprint),
+            "INSERT INTO product_metadata VALUES(1,?1,?2,?3,?4)",
+            (product, version, revision, fingerprint),
         )
         .unwrap();
 }
@@ -34,9 +42,26 @@ fn named(root: &Path, values: &[(&str, &str)]) -> Vec<NamedFile> {
         .collect()
 }
 
+fn bind_dufs(database: &Path, tree: &Path) {
+    let metadata = fs::metadata(tree).unwrap();
+    let connection = Connection::open(database).unwrap();
+    for (name, value) in [
+        ("root-device-be", metadata.dev()),
+        ("root-inode-be", metadata.ino()),
+    ] {
+        connection
+            .execute(
+                "INSERT INTO store_meta(key,value) VALUES(?1,?2)",
+                (name, value.to_be_bytes().to_vec()),
+            )
+            .unwrap();
+    }
+}
+
 fn backup_and_restore(
     product: Product,
     version: &str,
+    revision: i64,
     schema: &str,
     fingerprint: &str,
     configuration: &[(&str, &str)],
@@ -52,8 +77,12 @@ fn backup_and_restore(
         schema,
         product.slug(),
         version,
+        revision,
         fingerprint,
     );
+    if product == Product::DufsRam {
+        bind_dufs(&source_database, &source_tree);
+    }
     let source_configuration = named(temporary.path(), configuration);
     let output = temporary.path().join("backup");
     let (credentials_key_id, credentials_key) = credentials
@@ -109,6 +138,20 @@ fn backup_and_restore(
     })
     .unwrap();
     assert!(destination.is_file());
+    if product == Product::DufsRam {
+        let stored: Vec<u8> = Connection::open(&destination)
+            .unwrap()
+            .query_row(
+                "SELECT value FROM store_meta WHERE key='root-inode-be'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            stored,
+            fs::metadata(&destination_tree).unwrap().ino().to_be_bytes()
+        );
+    }
     assert_eq!(
         fs::read(destination_tree.join("unicode-é-文件")).unwrap(),
         b"current-state"
@@ -125,15 +168,29 @@ fn backup_and_restore(
 fn sentinel_current_adapter_backs_up_verifies_and_restores_composite_state() {
     backup_and_restore(
         Product::SentinelMonitor,
-        "0.2.0",
-        include_str!("fixtures/sources/sentinel-monitor/0.2.0/database.sql"),
-        "f547ddc817d830d23b5305bb1f88b29898d6531568edd6eb194c2b629eb560c0",
+        "0.2.2",
+        7,
+        include_str!("fixtures/current/sentinel-monitor.sql"),
+        "bb64805d1434fa953b5a215c636c086d98bce467825f7e9b6d3a5c1c0bd359c4",
         &[
             ("sentinel.env", "CURRENT=1"),
             ("mediamtx.yml", "record: yes"),
             ("mediamtx.lock", "sha256=current"),
         ],
-        Some(("sentinel-credentials-0.2.0-key-1", [7; 32])),
+        Some(("primary", [7; 32])),
+    );
+}
+
+#[test]
+fn media_current_adapter_backs_up_verifies_and_restores_composite_state() {
+    backup_and_restore(
+        Product::MediaBackup,
+        "0.3.0",
+        5,
+        include_str!("fixtures/current/media-backup.sql"),
+        "a07c5723568cfcbf379a2173225122dc5db4e2168a50700d7f256aba3de5957e",
+        &[],
+        None,
     );
 }
 
@@ -141,8 +198,9 @@ fn sentinel_current_adapter_backs_up_verifies_and_restores_composite_state() {
 fn dufs_current_adapter_backs_up_verifies_and_restores_composite_state() {
     backup_and_restore(
         Product::DufsRam,
-        "0.50.1",
-        include_str!("fixtures/sources/dufs-ram/0.50.1/database.sql"),
+        "0.51.0",
+        1,
+        include_str!("fixtures/current/dufs-ram.sql"),
         "3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423",
         &[("dufs.yaml", "auth:\n  - admin:current")],
         None,
@@ -168,20 +226,22 @@ fn composite_adapter_rejects_wrong_resource_sets() {
 #[test]
 fn composite_restore_replaces_configuration_with_the_same_generation() {
     let temporary = tempfile::tempdir().unwrap();
-    let schema = include_str!("fixtures/sources/dufs-ram/0.50.1/database.sql");
+    let schema = include_str!("fixtures/current/dufs-ram.sql");
     let fingerprint = "3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423";
     let source_database = temporary.path().join("source.sqlite3");
     let source_tree = temporary.path().join("source-tree");
     let source_configuration = temporary.path().join("source-dufs.yaml");
     let backup = temporary.path().join("backup");
+    fs::create_dir(&source_tree).unwrap();
     database(
         &source_database,
         schema,
         Product::DufsRam.slug(),
-        "0.50.1",
+        "0.51.0",
+        1,
         fingerprint,
     );
-    fs::create_dir(&source_tree).unwrap();
+    bind_dufs(&source_database, &source_tree);
     fs::write(source_tree.join("state"), b"incoming").unwrap();
     fs::write(&source_configuration, b"auth: incoming").unwrap();
     backup_current(&CompositeCurrentOptions {
@@ -202,14 +262,16 @@ fn composite_restore_replaces_configuration_with_the_same_generation() {
     let destination = temporary.path().join("destination.sqlite3");
     let destination_tree = temporary.path().join("destination-tree");
     let destination_configuration = temporary.path().join("dufs.yaml");
+    fs::create_dir(&destination_tree).unwrap();
     database(
         &destination,
         schema,
         Product::DufsRam.slug(),
-        "0.50.1",
+        "0.51.0",
+        1,
         fingerprint,
     );
-    fs::create_dir(&destination_tree).unwrap();
+    bind_dufs(&destination, &destination_tree);
     fs::write(destination_tree.join("state"), b"original").unwrap();
     fs::write(&destination_configuration, b"auth: original").unwrap();
     restore_current(&CurrentRestoreOptions {

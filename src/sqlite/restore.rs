@@ -1210,15 +1210,15 @@ mod tests {
         let source = root.path().join("source.sqlite3");
         let destination = root.path().join("destination.sqlite3");
         let backup = root.path().join("backup");
-        create_current_database(&source, Product::HostMonitoring, "0.8.0");
-        create_current_database(&destination, Product::HostMonitoring, "0.8.0");
+        create_current_database(&source, Product::HostMonitoring, "0.9.26");
+        create_current_database(&destination, Product::HostMonitoring, "0.9.26");
         let before = fs::read(&destination).unwrap();
         create_sqlite_backup(Product::HostMonitoring, &source, &backup).unwrap();
 
         assert!(
             restore_sqlite_backup(
                 Product::HostMonitoring,
-                "0.8.0",
+                "0.9.26",
                 &backup,
                 &destination,
                 RestoreExisting::Refuse,
@@ -1234,8 +1234,8 @@ mod tests {
         let source = root.path().join("source.sqlite3");
         let destination = root.path().join("destination.sqlite3");
         let backup = root.path().join("backup");
-        create_current_database(&source, Product::HostMonitoring, "0.8.0");
-        create_current_database(&destination, Product::HostMonitoring, "0.8.0");
+        create_current_database(&source, Product::HostMonitoring, "0.9.26");
+        create_current_database(&destination, Product::HostMonitoring, "0.9.26");
         insert_test_record(&source, Product::HostMonitoring, "new");
         insert_test_record(&destination, Product::HostMonitoring, "old-one");
         insert_test_record(&destination, Product::HostMonitoring, "old-two");
@@ -1243,7 +1243,7 @@ mod tests {
 
         restore_sqlite_backup(
             Product::HostMonitoring,
-            "0.8.0",
+            "0.9.26",
             &backup,
             &destination,
             RestoreExisting::Replace,
@@ -1259,8 +1259,8 @@ mod tests {
             let source = root.path().join("source.sqlite3");
             let destination = root.path().join("destination.sqlite3");
             let backup = root.path().join("backup");
-            create_current_database(&source, Product::HostMonitoring, "0.8.0");
-            create_current_database(&destination, Product::HostMonitoring, "0.8.0");
+            create_current_database(&source, Product::HostMonitoring, "0.9.26");
+            create_current_database(&destination, Product::HostMonitoring, "0.9.26");
             insert_test_record(&source, Product::HostMonitoring, "new");
             insert_test_record(&destination, Product::HostMonitoring, "old-one");
             insert_test_record(&destination, Product::HostMonitoring, "old-two");
@@ -1294,7 +1294,7 @@ mod tests {
             drop(recovery);
             drop(maintenance);
 
-            recover_sqlite_restore(Product::HostMonitoring, "0.8.0", &recovery_path, action)
+            recover_sqlite_restore(Product::HostMonitoring, "0.9.26", &recovery_path, action)
                 .unwrap();
             assert_eq!(
                 test_record_count(&destination, Product::HostMonitoring),
@@ -1314,8 +1314,8 @@ mod tests {
         let source = root.path().join("source.sqlite3");
         let destination = root.path().join("destination.sqlite3");
         let backup = root.path().join("backup");
-        create_current_database(&source, Product::HostMonitoring, "0.8.0");
-        create_current_database(&destination, Product::HostMonitoring, "0.8.0");
+        create_current_database(&source, Product::HostMonitoring, "0.9.26");
+        create_current_database(&destination, Product::HostMonitoring, "0.9.26");
         let before = fs::read(&destination).unwrap();
         create_sqlite_backup(Product::HostMonitoring, &source, &backup).unwrap();
 
@@ -1339,7 +1339,7 @@ mod tests {
         assert!(
             restore_sqlite_backup(
                 Product::HostMonitoring,
-                "0.8.0",
+                "0.9.26",
                 &backup,
                 &destination,
                 RestoreExisting::Replace,
@@ -1356,9 +1356,9 @@ mod tests {
         let host_destination = root.path().join("host-destination.sqlite3");
         let sunshine_destination = root.path().join("sunshine-destination.sqlite3");
         let backup = root.path().join("backup");
-        create_current_database(&source, Product::HostMonitoring, "0.8.0");
-        create_current_database(&host_destination, Product::HostMonitoring, "0.8.0");
-        create_current_database(&sunshine_destination, Product::SunshineManager, "0.8.0");
+        create_current_database(&source, Product::HostMonitoring, "0.9.26");
+        create_current_database(&host_destination, Product::HostMonitoring, "0.9.26");
+        create_current_database(&sunshine_destination, Product::SunshineManager, "0.10.1");
         insert_test_record(&host_destination, Product::HostMonitoring, "keep-host");
         insert_test_record(
             &sunshine_destination,
@@ -1372,7 +1372,7 @@ mod tests {
         assert!(
             restore_sqlite_backup(
                 Product::SunshineManager,
-                "0.8.0",
+                "0.9.26",
                 &backup,
                 &sunshine_destination,
                 RestoreExisting::Replace,
@@ -1383,7 +1383,7 @@ mod tests {
         assert!(
             restore_sqlite_backup(
                 Product::HostMonitoring,
-                "0.8.0",
+                "0.9.26",
                 &backup,
                 &sunshine_destination,
                 RestoreExisting::Replace,
@@ -1404,7 +1404,7 @@ mod tests {
         assert!(
             restore_sqlite_backup(
                 Product::HostMonitoring,
-                "0.8.0",
+                "0.9.26",
                 &backup,
                 &host_destination,
                 RestoreExisting::Replace,
@@ -1436,7 +1436,7 @@ mod tests {
         assert!(
             restore_sqlite_backup(
                 Product::HostMonitoring,
-                "0.8.0",
+                "0.9.26",
                 &backup,
                 &host_destination,
                 RestoreExisting::Replace,
@@ -1452,8 +1452,8 @@ mod tests {
         let source = root.path().join("source.sqlite3");
         let destination = root.path().join("destination.sqlite3");
         let backup = root.path().join("backup");
-        create_current_database(&source, Product::HostMonitoring, "0.8.0");
-        create_current_database(&destination, Product::HostMonitoring, "0.8.0");
+        create_current_database(&source, Product::HostMonitoring, "0.9.26");
+        create_current_database(&destination, Product::HostMonitoring, "0.9.26");
         insert_test_record(&source, Product::HostMonitoring, "new");
         insert_test_record(&destination, Product::HostMonitoring, "old");
         create_sqlite_backup(Product::HostMonitoring, &source, &backup).unwrap();
@@ -1491,7 +1491,7 @@ mod tests {
         assert!(
             recover_sqlite_restore(
                 Product::SunshineManager,
-                "0.8.0",
+                "0.9.26",
                 &recovery_path,
                 RecoveryAction::Rollback,
             )
@@ -1518,7 +1518,7 @@ mod tests {
         assert!(
             recover_sqlite_restore(
                 Product::HostMonitoring,
-                "0.8.0",
+                "0.9.26",
                 &recovery_path,
                 RecoveryAction::Rollback,
             )
@@ -1549,7 +1549,7 @@ mod tests {
         assert!(
             recover_sqlite_restore(
                 Product::HostMonitoring,
-                "0.8.0",
+                "0.9.26",
                 &recovery_path,
                 RecoveryAction::Rollback,
             )

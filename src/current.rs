@@ -10,14 +10,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use aes_gcm::{
-    Aes256Gcm, Nonce,
-    aead::{Aead, KeyInit, Payload},
-};
 use anyhow::{Context, ensure};
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use hkdf::Hkdf;
 use rusqlite::{Connection, OpenFlags, backup::Backup};
+use sarmg_secret::SecretKey;
+use sarmg_secret_envelope::EnvelopeDomain;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -28,7 +24,7 @@ const MANIFEST_FILE: &str = "manifest.json";
 const DATABASE_FILE: &str = "database.sqlite3";
 const TREE_DIRECTORY: &str = "tree";
 const CURRENT_MANIFEST_VERSION: u32 = 3;
-const CURRENT_RESTORE_JOURNAL_VERSION: u32 = 3;
+const CURRENT_RESTORE_JOURNAL_VERSION: u32 = 4;
 const MAX_MANIFEST_BYTES: u64 = 128 * 1024 * 1024;
 // A journal contains the accepted source manifest tree and, when replacing an
 // existing installation, one equally bounded original-tree inventory. Keep a
@@ -40,21 +36,16 @@ const MAX_CURRENT_JOURNAL_BYTES: u64 = MAX_MANIFEST_BYTES * 2 + 16 * 1024 * 1024
 const MAX_TREE_ENTRIES: u64 = 2_000_000;
 const MAX_TREE_DEPTH: usize = 128;
 
-pub(crate) const MEDIA_CURRENT_APPLICATION_VERSION: &str = "0.2.0";
-const MEDIA_SCHEMA_REVISION: u64 = 1;
+pub(crate) const MEDIA_CURRENT_APPLICATION_VERSION: &str = "0.3.0";
+const MEDIA_SCHEMA_REVISION: u64 = 5;
 const MEDIA_SCHEMA_SHA256: &str =
-    "2563e6afc3fff272d02b7a5615272cc773862243bfd15aec51655abf1d9c6b1c";
-pub(crate) const SENTINEL_CURRENT_APPLICATION_VERSION: &str = "0.2.0";
-const SENTINEL_SCHEMA_REVISION: u64 = 1;
+    "a07c5723568cfcbf379a2173225122dc5db4e2168a50700d7f256aba3de5957e";
+pub(crate) const SENTINEL_CURRENT_APPLICATION_VERSION: &str = "0.2.2";
+const SENTINEL_SCHEMA_REVISION: u64 = 7;
 const SENTINEL_SCHEMA_SHA256: &str =
-    "f547ddc817d830d23b5305bb1f88b29898d6531568edd6eb194c2b629eb560c0";
-const SENTINEL_KEY_ID: &str = "sentinel-credentials-0.2.0-key-1";
-const SENTINEL_KEY_DERIVATION_SALT: &[u8] = b"sentinel-monitor/0.2.0/credential-envelope/key/v1";
-const SENTINEL_KEY_DERIVATION_INFO: &[u8] = b"sentinel-credential-envelope/aes-256-gcm";
-const SENTINEL_AAD_DOMAIN: &str = "sentinel-monitor/0.2.0/credential-envelope/aad/v1";
-const SENTINEL_MAX_ENVELOPE_BYTES: usize = 64 * 1024;
-const SENTINEL_MAX_PLAINTEXT_BYTES: usize = 16 * 1024;
-pub(crate) const DUFS_CURRENT_APPLICATION_VERSION: &str = "0.50.1";
+    "bb64805d1434fa953b5a215c636c086d98bce467825f7e9b6d3a5c1c0bd359c4";
+const SENTINEL_MAX_ENVELOPE_BYTES: usize = 1024;
+pub(crate) const DUFS_CURRENT_APPLICATION_VERSION: &str = "0.51.0";
 const DUFS_SCHEMA_REVISION: u64 = 1;
 const DUFS_SCHEMA_SHA256: &str = "3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423";
 
@@ -238,6 +229,8 @@ struct RestoreJournal {
     database_original: PathBuf,
     tree_original: PathBuf,
     incoming_database: CurrentFile,
+    source_database: CurrentFile,
+    dufs_root_identity: Option<DufsRootIdentity>,
     incoming_tree: TreeArchive,
     original_database: Option<CurrentFile>,
     original_tree: Option<TreeArchive>,
@@ -245,6 +238,13 @@ struct RestoreJournal {
     configuration_targets: Vec<RestoreConfiguration>,
     external_requirements: Vec<ExternalRequirement>,
     phase: RestorePhase,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct DufsRootIdentity {
+    device: u64,
+    inode: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -259,15 +259,11 @@ struct RestoreConfiguration {
     original_file: Option<CurrentFile>,
 }
 
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct SentinelCredentialEnvelope {
-    product: String,
-    application_version: String,
-    envelope_revision: u32,
-    key_id: String,
-    nonce: String,
-    ciphertext: String,
+struct SentinelClientAuthorizationEnvelope;
+
+impl EnvelopeDomain for SentinelClientAuthorizationEnvelope {
+    const DOMAIN: &'static [u8] = b"sentinel-monitor/client-authorization";
+    const REVISION: u16 = 1;
 }
 
 pub fn backup_current(options: &CompositeCurrentOptions) -> anyhow::Result<CurrentStateResult> {
@@ -281,6 +277,9 @@ pub fn backup_current(options: &CompositeCurrentOptions) -> anyhow::Result<Curre
     let identity = verify_database(options.product, &options.database)?;
     verify_external_key(options.product, &options.database, options.credentials())?;
     verify_product_state(options.product, &options.database, &options.tree)?;
+    if options.product == Product::DufsRam {
+        verify_dufs_root_binding(&options.database, &options.tree)?;
+    }
     verify_configuration(options.product, &options.configuration, &options.tree)?;
 
     // Both the SQLite-only and composite backup paths publish through the same
@@ -369,6 +368,13 @@ pub fn verify_current_backup(
         "backup database digest mismatch"
     );
     verify_tree_archive(&manifest.tree, &options.output.join(TREE_DIRECTORY))?;
+    if options.product == Product::DufsRam {
+        ensure!(
+            dufs_source_identity_sha256(&options.output.join(DATABASE_FILE))?
+                == manifest.source_tree_identity_sha256,
+            "Dufs backup database is not bound to its recorded source root"
+        );
+    }
     for file in &manifest.configuration {
         ensure!(
             *file == current_file(&file.path, &options.output.join(&file.path))?,
@@ -483,6 +489,9 @@ pub fn restore_current(options: &CurrentRestoreOptions) -> anyhow::Result<Curren
             .context("existing restore database is not the exact current generation")?;
         verify_product_state(options.product, &database, &tree)
             .context("existing restore tree is not the exact current generation")?;
+        if options.product == Product::DufsRam {
+            verify_dufs_root_binding(&database, &tree)?;
+        }
         (
             Some(current_file(DATABASE_FILE, &database)?),
             Some(inventory_tree(&tree)?),
@@ -509,6 +518,15 @@ pub fn restore_current(options: &CurrentRestoreOptions) -> anyhow::Result<Curren
     )?;
     verify_database(options.product, &database_stage)?;
     verify_product_state(options.product, &database_stage, &tree_stage)?;
+    let dufs_root_identity = if options.product == Product::DufsRam {
+        let identity = DufsRootIdentity::from_tree(&tree_stage)?;
+        rebind_dufs_database(&database_stage, identity)?;
+        verify_dufs_root_binding(&database_stage, &tree_stage)?;
+        Some(identity)
+    } else {
+        None
+    };
+    let incoming_database = current_file(DATABASE_FILE, &database_stage)?;
     let mut restore_configuration = Vec::new();
     for (target, exists) in configuration_targets.iter().zip(configuration_exists) {
         let incoming = manifest
@@ -568,7 +586,9 @@ pub fn restore_current(options: &CurrentRestoreOptions) -> anyhow::Result<Curren
         tree_stage,
         database_original,
         tree_original,
-        incoming_database: manifest.database.clone(),
+        incoming_database,
+        source_database: manifest.database.clone(),
+        dufs_root_identity,
         incoming_tree: manifest.tree.clone(),
         original_database,
         original_tree,
@@ -579,6 +599,7 @@ pub fn restore_current(options: &CurrentRestoreOptions) -> anyhow::Result<Curren
     };
     validate_restore_journal(&journal, &recovery)?;
     write_journal(&recovery, &journal)?;
+    verify_recovery_source(&journal)?;
     resume_current_commit(&recovery, &mut journal)?;
     verify_external_key(
         options.product,
@@ -818,6 +839,17 @@ fn validate_restore_journal(journal: &RestoreJournal, recovery: &Path) -> anyhow
         }
     }
     validate_current_file(&journal.incoming_database, DATABASE_FILE)?;
+    validate_current_file(&journal.source_database, DATABASE_FILE)?;
+    ensure!(
+        (journal.product == Product::DufsRam) == journal.dufs_root_identity.is_some(),
+        "Dufs restore root identity is missing or unexpected"
+    );
+    if journal.product != Product::DufsRam {
+        ensure!(
+            journal.source_database == journal.incoming_database,
+            "non-Dufs restore cannot transform its database"
+        );
+    }
     validate_tree_archive_contract(&journal.incoming_tree)?;
     match (&journal.original_database, &journal.original_tree) {
         (Some(database), Some(tree)) => {
@@ -940,18 +972,36 @@ fn verify_recovery_source(journal: &RestoreJournal) -> anyhow::Result<()> {
             && manifest.adapter_id == journal.adapter_id
             && manifest.schema_identity == journal.schema_identity
             && manifest.source_tree_identity_sha256 == journal.source_tree_identity_sha256
-            && manifest.database == journal.incoming_database
+            && manifest.database == journal.source_database
             && manifest.tree == journal.incoming_tree
             && manifest.configuration == journal.configuration
             && manifest.external_requirements == journal.external_requirements,
         "current restore journal does not match its exact source manifest"
     );
     verify_incoming_generation(
-        &journal.incoming_database,
+        &journal.source_database,
         &journal.incoming_tree,
         &journal.source_backup.join(DATABASE_FILE),
         &journal.source_backup.join(TREE_DIRECTORY),
     )?;
+    if journal.product == Product::DufsRam {
+        ensure!(
+            dufs_source_identity_sha256(&journal.source_backup.join(DATABASE_FILE))?
+                == journal.source_tree_identity_sha256,
+            "Dufs source database root binding differs from its manifest"
+        );
+        let root = journal
+            .dufs_root_identity
+            .context("Dufs restore root identity is absent")?;
+        let temporary = tempfile::tempdir()?;
+        let candidate = temporary.path().join(DATABASE_FILE);
+        copy_regular(&journal.source_backup.join(DATABASE_FILE), &candidate)?;
+        rebind_dufs_database(&candidate, root)?;
+        ensure!(
+            current_file(DATABASE_FILE, &candidate)? == journal.incoming_database,
+            "Dufs incoming database is not the exact root-rebound source snapshot"
+        );
+    }
     ensure!(
         verify_database(journal.product, &journal.source_backup.join(DATABASE_FILE))?
             == journal.schema_identity,
@@ -988,6 +1038,22 @@ fn verify_recovery_evidence(
     let tree_stage = observed_tree_archive(&journal.tree_stage)?;
     let database_target = observed_current_file(&journal.database, DATABASE_FILE)?;
     let tree_target = observed_tree_archive(&journal.tree)?;
+    if let Some(expected) = journal.dufs_root_identity {
+        if tree_stage.is_some() {
+            ensure!(
+                DufsRootIdentity::from_tree(&journal.tree_stage)? == expected,
+                "Dufs staged tree inode differs from the restore journal"
+            );
+        }
+        if tree_target.as_ref() == Some(&journal.incoming_tree)
+            && database_target.as_ref() == Some(&journal.incoming_database)
+        {
+            ensure!(
+                DufsRootIdentity::from_tree(&journal.tree)? == expected,
+                "Dufs installed tree inode differs from the restore journal"
+            );
+        }
+    }
     let database_original = observed_current_file(&journal.database_original, DATABASE_FILE)?;
     let tree_original = observed_tree_archive(&journal.tree_original)?;
 
@@ -1591,6 +1657,9 @@ fn verify_installed_generation(journal: &RestoreJournal) -> anyhow::Result<()> {
         "installed current database identity mismatch"
     );
     verify_product_state(journal.product, &journal.database, &journal.tree)?;
+    if journal.product == Product::DufsRam {
+        verify_dufs_root_binding(&journal.database, &journal.tree)?;
+    }
     verify_installed_configuration(journal, false)
 }
 
@@ -1742,8 +1811,13 @@ fn validate_product_resources(
                 == ["mediamtx.lock", "mediamtx.yml", "sentinel.env"]
                 && external.len() == 1
                 && external[0].kind == "credentials-key"
-                && external[0].kid == "sentinel-credentials-0.2.0-key-1"
-                && external[0].algorithm == "aes-256-gcm-hkdf-sha256"
+                && !external[0].kid.is_empty()
+                && external[0].kid.len() <= 64
+                && external[0]
+                    .kid
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+                && external[0].algorithm == "sarmg-secret-envelope-aes-256-gcm"
                 && external[0].envelope_version == 1,
             "Sentinel current resources are not exact"
         ),
@@ -1813,7 +1887,7 @@ fn product_contract(product: Product) -> anyhow::Result<(&'static str, u64, &'st
 fn verify_database(product: Product, path: &Path) -> anyhow::Result<SchemaIdentity> {
     let (version, revision, expected_sha) = product_contract(product)?;
     let expected = SchemaIdentity::new(product.slug(), version, revision, expected_sha)
-        .context("compiled Media schema identity is invalid")?;
+        .context("compiled product schema identity is invalid")?;
     let actual = crate::sqlite::verify_schema_identity_database(path)?;
     actual.require_exact(&expected).with_context(|| {
         format!("database is not the exact official current {product} contract")
@@ -1831,8 +1905,12 @@ fn verify_external_key(
         (Product::DufsRam, None) => Ok(()),
         (Product::SentinelMonitor, Some((kid, key))) => {
             ensure!(
-                kid == SENTINEL_KEY_ID,
-                "Sentinel credentials key ID is not current"
+                !kid.is_empty()
+                    && kid.len() <= 64
+                    && kid
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')),
+                "Sentinel credentials key ID is invalid"
             );
             verify_sentinel_credentials(database, key)
         }
@@ -1841,118 +1919,53 @@ fn verify_external_key(
 }
 
 fn verify_sentinel_credentials(database: &Path, master_key: &[u8; 32]) -> anyhow::Result<()> {
-    let mut derived_key = [0_u8; 32];
-    Hkdf::<Sha256>::new(Some(SENTINEL_KEY_DERIVATION_SALT), master_key)
-        .expand(SENTINEL_KEY_DERIVATION_INFO, &mut derived_key)
-        .map_err(|_| anyhow::anyhow!("Sentinel credential key derivation failed"))?;
-    let cipher = Aes256Gcm::new_from_slice(&derived_key)
-        .map_err(|_| anyhow::anyhow!("Sentinel credential key is invalid"))?;
+    let key = SecretKey::new(*master_key);
     let connection = Connection::open_with_flags(database, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let mut statement = connection.prepare(
-        "SELECT id, main_stream_url_enc, sub_stream_url_enc, username_enc, password_enc \
-         FROM cameras ORDER BY id",
+        "SELECT id, authorization_code_enc, authorization_code_hash FROM sentinel_clients ORDER BY id",
     )?;
     let rows = statement.query_map([], |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, Vec<u8>>(1)?,
-            row.get::<_, Option<Vec<u8>>>(2)?,
-            row.get::<_, Option<Vec<u8>>>(3)?,
-            row.get::<_, Option<Vec<u8>>>(4)?,
+            row.get::<_, Vec<u8>>(2)?,
         ))
     })?;
     for row in rows {
-        let (camera_id, main, sub, username, password) = row?;
-        let camera_id =
-            Uuid::parse_str(&camera_id).context("Sentinel camera ID is not a canonical UUID")?;
-        for (field, envelope) in [
-            ("main_stream_url_enc", Some(main)),
-            ("sub_stream_url_enc", sub),
-            ("username_enc", username),
-            ("password_enc", password),
-        ] {
-            if let Some(envelope) = envelope {
-                decrypt_sentinel_credential(&cipher, camera_id, field, &envelope)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn decrypt_sentinel_credential(
-    cipher: &Aes256Gcm,
-    camera_id: Uuid,
-    field: &str,
-    encoded: &[u8],
-) -> anyhow::Result<()> {
-    ensure!(
-        !encoded.is_empty() && encoded.len() <= SENTINEL_MAX_ENVELOPE_BYTES,
-        "Sentinel credential envelope is not exactly current or authenticated"
-    );
-    let envelope: SentinelCredentialEnvelope = serde_json::from_slice(encoded)
-        .context("Sentinel credential envelope is not exactly current or authenticated")?;
-    ensure!(
-        serde_json::to_vec(&envelope)? == encoded
-            && envelope.product == Product::SentinelMonitor.slug()
-            && envelope.application_version == SENTINEL_CURRENT_APPLICATION_VERSION
-            && envelope.envelope_revision == 1
-            && envelope.key_id == SENTINEL_KEY_ID,
-        "Sentinel credential envelope is not exactly current or authenticated"
-    );
-    let nonce = decode_sentinel_base64(&envelope.nonce)?;
-    let nonce: [u8; 12] = nonce.try_into().map_err(|_| {
-        anyhow::anyhow!("Sentinel credential envelope is not exactly current or authenticated")
-    })?;
-    let ciphertext = decode_sentinel_base64(&envelope.ciphertext)?;
-    ensure!(
-        (16..=SENTINEL_MAX_PLAINTEXT_BYTES + 16).contains(&ciphertext.len()),
-        "Sentinel credential envelope is not exactly current or authenticated"
-    );
-    let aad = sentinel_credential_aad(camera_id, field);
-    let plaintext = cipher
-        .decrypt(
-            Nonce::from_slice(&nonce),
-            Payload {
-                msg: &ciphertext,
-                aad: &aad,
-            },
+        let (client_id, envelope, stored_hash) = row?;
+        let id = Uuid::parse_str(&client_id).context("Sentinel client ID is not a UUID")?;
+        ensure!(
+            id.hyphenated().to_string() == client_id,
+            "Sentinel client ID is not canonical"
+        );
+        ensure!(
+            (64..=SENTINEL_MAX_ENVELOPE_BYTES).contains(&envelope.len()),
+            "Sentinel credential envelope is not current"
+        );
+        let mut binding = Vec::with_capacity(8 + client_id.len());
+        binding.extend_from_slice(&(client_id.len() as u64).to_be_bytes());
+        binding.extend_from_slice(client_id.as_bytes());
+        let plaintext = sarmg_secret_envelope::open::<SentinelClientAuthorizationEnvelope>(
+            &key, &binding, &envelope,
         )
         .map_err(|_| {
-            anyhow::anyhow!("Sentinel credential envelope is not exactly current or authenticated")
+            anyhow::anyhow!("Sentinel credentials key cannot authenticate client authorization")
         })?;
-    String::from_utf8(plaintext)
-        .map(|_| ())
-        .map_err(|_| anyhow::anyhow!("Sentinel credential plaintext is not UTF-8"))
-}
-
-fn decode_sentinel_base64(encoded: &str) -> anyhow::Result<Vec<u8>> {
-    let decoded = URL_SAFE_NO_PAD.decode(encoded).map_err(|_| {
-        anyhow::anyhow!("Sentinel credential envelope is not exactly current or authenticated")
-    })?;
-    ensure!(
-        URL_SAFE_NO_PAD.encode(&decoded) == encoded,
-        "Sentinel credential envelope is not exactly current or authenticated"
-    );
-    Ok(decoded)
-}
-
-fn sentinel_credential_aad(camera_id: Uuid, field: &str) -> Vec<u8> {
-    let camera_id = camera_id.hyphenated().to_string();
-    let revision = "1";
-    let mut aad = Vec::new();
-    for value in [
-        SENTINEL_AAD_DOMAIN,
-        Product::SentinelMonitor.slug(),
-        SENTINEL_CURRENT_APPLICATION_VERSION,
-        revision,
-        SENTINEL_KEY_ID,
-        camera_id.as_str(),
-        field,
-    ] {
-        aad.extend_from_slice(&(value.len() as u64).to_be_bytes());
-        aad.extend_from_slice(value.as_bytes());
+        let code = std::str::from_utf8(plaintext.expose())
+            .context("Sentinel authorization is not UTF-8")?;
+        ensure!(
+            code.len() == 36
+                && code
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || byte.is_ascii_lowercase()),
+            "Sentinel authorization code is invalid"
+        );
+        ensure!(
+            stored_hash == Sha256::digest(code.as_bytes()).as_slice(),
+            "Sentinel authorization digest differs from encrypted value"
+        );
     }
-    aad
+    Ok(())
 }
 
 fn external_requirements(
@@ -1967,7 +1980,7 @@ fn external_requirements_for(credentials: Option<(&str, &[u8; 32])>) -> Vec<Exte
             kind: "credentials-key".to_owned(),
             kid: kid.to_owned(),
             sha256: lower_hex(&Sha256::digest(key)),
-            algorithm: "aes-256-gcm-hkdf-sha256".to_owned(),
+            algorithm: "sarmg-secret-envelope-aes-256-gcm".to_owned(),
             envelope_version: 1,
         }],
         None => Vec::new(),
@@ -2701,6 +2714,79 @@ fn path_identity_sha256(path: &Path) -> anyhow::Result<String> {
     Ok(lower_hex(&hasher.finalize()))
 }
 
+impl DufsRootIdentity {
+    fn from_tree(path: &Path) -> anyhow::Result<Self> {
+        let metadata = fs::symlink_metadata(path)?;
+        ensure!(
+            metadata.is_dir() && !metadata.file_type().is_symlink(),
+            "Dufs shared root is not a directory"
+        );
+        Ok(Self {
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        })
+    }
+
+    fn source_identity_sha256(self) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(b"sarmg-current-tree-identity-v1\0");
+        hasher.update(self.device.to_be_bytes());
+        hasher.update(self.inode.to_be_bytes());
+        lower_hex(&hasher.finalize())
+    }
+}
+
+fn read_dufs_root_identity(database: &Path) -> anyhow::Result<DufsRootIdentity> {
+    let connection = Connection::open_with_flags(database, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let read = |name: &str| -> anyhow::Result<u64> {
+        let bytes: Vec<u8> =
+            connection.query_row("SELECT value FROM store_meta WHERE key=?1", [name], |row| {
+                row.get(0)
+            })?;
+        let bytes: [u8; 8] = bytes
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("Dufs root identity has invalid byte length"))?;
+        Ok(u64::from_be_bytes(bytes))
+    };
+    Ok(DufsRootIdentity {
+        device: read("root-device-be")?,
+        inode: read("root-inode-be")?,
+    })
+}
+
+fn dufs_source_identity_sha256(database: &Path) -> anyhow::Result<String> {
+    Ok(read_dufs_root_identity(database)?.source_identity_sha256())
+}
+
+fn verify_dufs_root_binding(database: &Path, tree: &Path) -> anyhow::Result<()> {
+    ensure!(
+        read_dufs_root_identity(database)? == DufsRootIdentity::from_tree(tree)?,
+        "Dufs database is bound to a different shared root device or inode"
+    );
+    Ok(())
+}
+
+fn rebind_dufs_database(database: &Path, root: DufsRootIdentity) -> anyhow::Result<()> {
+    let mut connection = Connection::open_with_flags(database, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+    let transaction = connection.transaction()?;
+    for (name, value) in [
+        ("root-device-be", root.device),
+        ("root-inode-be", root.inode),
+    ] {
+        ensure!(
+            transaction.execute(
+                "UPDATE store_meta SET value=?1 WHERE key=?2",
+                (value.to_be_bytes().to_vec(), name)
+            )? == 1,
+            "Dufs root binding metadata is incomplete"
+        );
+    }
+    transaction.commit()?;
+    drop(connection);
+    File::open(database)?.sync_all()?;
+    Ok(())
+}
+
 fn sync_parent(path: &Path) -> anyhow::Result<()> {
     File::open(path.parent().context("path has no parent")?)?.sync_all()?;
     Ok(())
@@ -2783,31 +2869,16 @@ mod tests {
         }
     }
 
-    fn sentinel_test_envelope(key: &[u8; 32], camera_id: Uuid, plaintext: &str) -> Vec<u8> {
-        let mut derived_key = [0_u8; 32];
-        Hkdf::<Sha256>::new(Some(SENTINEL_KEY_DERIVATION_SALT), key)
-            .expand(SENTINEL_KEY_DERIVATION_INFO, &mut derived_key)
-            .unwrap();
-        let cipher = Aes256Gcm::new_from_slice(&derived_key).unwrap();
-        let nonce = [3_u8; 12];
-        let aad = sentinel_credential_aad(camera_id, "main_stream_url_enc");
-        let ciphertext = cipher
-            .encrypt(
-                Nonce::from_slice(&nonce),
-                Payload {
-                    msg: plaintext.as_bytes(),
-                    aad: &aad,
-                },
-            )
-            .unwrap();
-        serde_json::to_vec(&SentinelCredentialEnvelope {
-            product: Product::SentinelMonitor.slug().to_owned(),
-            application_version: SENTINEL_CURRENT_APPLICATION_VERSION.to_owned(),
-            envelope_revision: 1,
-            key_id: SENTINEL_KEY_ID.to_owned(),
-            nonce: URL_SAFE_NO_PAD.encode(nonce),
-            ciphertext: URL_SAFE_NO_PAD.encode(ciphertext),
-        })
+    fn sentinel_test_envelope(key: &[u8; 32], client_id: Uuid, plaintext: &str) -> Vec<u8> {
+        let id = client_id.hyphenated().to_string();
+        let mut binding = Vec::new();
+        binding.extend_from_slice(&(id.len() as u64).to_be_bytes());
+        binding.extend_from_slice(id.as_bytes());
+        sarmg_secret_envelope::seal::<SentinelClientAuthorizationEnvelope>(
+            &SecretKey::new(*key),
+            &binding,
+            &sarmg_secret::SecretBytes::new(plaintext.as_bytes().to_vec()),
+        )
         .unwrap()
     }
 
@@ -2847,7 +2918,9 @@ mod tests {
             tree_stage: sibling(&tree, &format!("incoming-{nonce}")).unwrap(),
             database_original: sibling(&database, &format!("original-{nonce}")).unwrap(),
             tree_original: sibling(&tree, &format!("original-{nonce}")).unwrap(),
-            incoming_database: manifest.database,
+            incoming_database: manifest.database.clone(),
+            source_database: manifest.database,
+            dufs_root_identity: None,
             incoming_tree: manifest.tree,
             original_database: None,
             original_tree: None,
@@ -2888,18 +2961,23 @@ mod tests {
         let connection = Connection::open(&database).unwrap();
         connection
             .execute_batch(include_str!(
-                "../tests/fixtures/sources/sentinel-monitor/0.2.0/database.sql"
+                "../tests/fixtures/current/sentinel-monitor.sql"
             ))
             .unwrap();
         let camera_id = Uuid::new_v4();
         let key = [7_u8; 32];
-        let envelope = sentinel_test_envelope(&key, camera_id, "rtsp://camera.invalid/main");
+        let code = "a1".repeat(18);
+        let envelope = sentinel_test_envelope(&key, camera_id, &code);
         connection
             .execute(
-                "INSERT INTO cameras(\
-                    id,name,main_stream_url_enc,created_at,updated_at\
-                 ) VALUES(?1,'Camera',?2,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')",
-                (camera_id.hyphenated().to_string(), envelope),
+                "INSERT INTO sentinel_clients(\
+                    id,name,authorization_code_enc,authorization_code_hash,created_at,updated_at\
+                 ) VALUES(?1,'Client',?2,?3,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')",
+                (
+                    camera_id.hyphenated().to_string(),
+                    envelope,
+                    Sha256::digest(code.as_bytes()).to_vec(),
+                ),
             )
             .unwrap();
         drop(connection);

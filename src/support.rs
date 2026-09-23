@@ -175,7 +175,7 @@ mod tests {
         assert!(
             matrix
                 .supported_capabilities
-                .contains(&"media-backup-current-restore-0.2.0".to_owned())
+                .contains(&"media-backup-current-restore-0.3.0".to_owned())
         );
     }
 }

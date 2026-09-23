@@ -1,8 +1,0 @@
-{
-  "authenticated": true,
-  "role": "admin",
-  "username": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "csrf_token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-  "persistence": "memory-only",
-  "invalidated_by_restart": true
-}
