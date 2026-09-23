@@ -84,7 +84,7 @@ openssl pkeyutl -verify -rawin -pubin -inkey "$package/RELEASE-SIGNING-PUBLIC.pe
   -in "$package/SHA256SUMS" -sigfile "$package/SHA256SUMS.sig"
 tar --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric-owner \
   --mode='u+rwX,go+rX,go-w' -C "$package" -cf - . | zstd -19 -T0 -o "$output/$archive"
-sha256sum "$output/$archive" >"$output/$archive.sha256"
+(cd "$output" && sha256sum "$archive" >"$archive.sha256")
 
 extracted=$temporary/extracted
 mkdir "$extracted"

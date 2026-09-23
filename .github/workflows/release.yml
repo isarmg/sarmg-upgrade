@@ -83,7 +83,8 @@ jobs:
           printf '%s\n' "$RELEASE_SIGNING_KEY_PEM" >"$RUNNER_TEMP/release-signing-key.pem"
       - name: Sign, package, and re-verify
         run: |
-          "$RUNNER_TEMP/release-input/release-tools/finalize-release.sh" \
+          chmod 0755 "$RUNNER_TEMP/release-input/package/bin/sarmg-upgrade"
+          bash "$RUNNER_TEMP/release-input/release-tools/finalize-release.sh" \
             "$RUNNER_TEMP/release-input/package" \
             "$RUNNER_TEMP/release-signing-key.pem" \
             "$RUNNER_TEMP/final-release"
