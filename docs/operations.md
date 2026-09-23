@@ -147,7 +147,7 @@ CycloneDX SBOM、环境和 provenance；发布 job 不 checkout source，签名 
 `.tar.zst` 和 outer digest。已有 tag/release/asset 不覆盖。发布验收必须确认 binary 输出没有历史 edge。
 
 Ed25519 信任锚固定在 `release/sarmg-upgrade-release-signing-public.pem`。其 DER 编码 SHA-256 必须为
-`547e3a4566e7db00725b0bb764125a5dc9152ac06942957cf406de3de2b71ef5`，stage 会把公钥和该指纹写入
+`a12719e9a174ce673ef58cdaa04d606135c57f401c50b95246d3c1bebef33d68`，stage 会把公钥和该指纹写入
 source-bound package/release metadata。publish job 从 `RELEASE_SIGNING_KEY_PEM` Secret 取得私钥后，必须先
 派生公钥并与上述源码公钥逐字节相等；缺少 Secret、错误私钥、公钥漂移或 metadata 指纹漂移均在产生签名
 前失败。轮换密钥是新的明确发行合同：先在独立安全变更中提交新公钥、指纹、文档和负例，再原子更新

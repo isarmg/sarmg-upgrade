@@ -11,7 +11,7 @@ snapshot、SBOM、构建环境和 provenance 绑定在一起；finalize/publish 
 
 发行公钥不是 publish job 临时生成的身份。源码固定
 `release/sarmg-upgrade-release-signing-public.pem`，DER SHA-256 为
-`547e3a4566e7db00725b0bb764125a5dc9152ac06942957cf406de3de2b71ef5`；stage 把它及指纹绑定进 package。
+`a12719e9a174ce673ef58cdaa04d606135c57f401c50b95246d3c1bebef33d68`；stage 把它及指纹绑定进 package。
 finalize 从 GitHub Secret 私钥派生公钥并逐字节比较，只有完全相等才可签名。因此 Secret 配错会中止发行，
 不会悄悄生成另一套“看似有效”的自签名资产。密钥轮换必须删除旧信任，只发布一个新的明确合同。
 
