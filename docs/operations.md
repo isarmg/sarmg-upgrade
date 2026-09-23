@@ -144,7 +144,7 @@ key 文件内容为 Base64 编码的精确 32 bytes；文件必须为单硬链�
 
 ## 9. 正式发行
 
-annotated `v0.3.3` 触发构建和发布两阶段：完整 Rust 门禁，暂存 source-bound binary、support/catalog、
+annotated `v0.3.4` 触发构建和发布两阶段：完整 Rust 门禁，暂存 source-bound binary、support/catalog、
 CycloneDX SBOM、环境和 provenance；发布 job 检出事件提交以读取发行说明，不构建或运行检出树中的源码；签名 `SHA256SUMS`，解包复验后发布固定
 `.tar.zst` 和 outer digest。已有 tag/release/asset 不覆盖。发布验收必须确认 binary 输出没有历史 edge。
 签名前会重新核对暂存 `release.json` 的版本、事件提交 SHA、binary SHA-256 和能力目录 SHA-256；任一不符即停止。
@@ -158,8 +158,8 @@ Secret；不得同时接受新旧两把 key，也不得从下载归档本身建�
 
 Foundation 依赖是发布输入而不是运行时服务。发行前另行核对：
 
-1. `sarmg-contracts`、`sarmg-schema-identity`、`sarmg-secret` 与 `sarmg-secret-envelope` 均精确为 `=0.9.1`，Git rev 精确为
-   `84966364c5b4662104e05741b3045482e4fd4fc8`；
+1. `sarmg-contracts`、`sarmg-schema-identity`、`sarmg-secret` 与 `sarmg-secret-envelope` 均精确为 `=0.9.2`，Git rev 精确为
+   `0174fc1b6ffcdf876e6dc7c715f107266582410e`；
 2. `Cargo.lock` 中没有第二版本，也没有 registry/path fallback 或可漂移 branch；
 3. `cargo test --locked --all-targets --all-features` 覆盖 shared manifest parser、metadata column/row adapter、
    schema fingerprint 和本仓库产品级负例；

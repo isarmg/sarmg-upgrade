@@ -1,6 +1,6 @@
 # Sarmg Upgrade 完整功能与取舍清单
 
-本文描述 `sarmg-upgrade 0.3.3` 当前二进制实际提供的能力：明确版本的备份、严格校验、恢复、恢复日志和发布验证。支持矩阵中的 `upgrade_edges` 全部为空；工具不提供跨版本数据转换。
+本文描述 `sarmg-upgrade 0.3.4` 当前二进制实际提供的能力：明确版本的备份、严格校验、恢复、恢复日志和发布验证。支持矩阵中的 `upgrade_edges` 全部为空；工具不提供跨版本数据转换。
 
 正式工具唯一支持 Linux AMD64 GNU `x86_64-unknown-linux-gnu`。它是停机离线 CLI，不是 Server，也没有
 React/Vite 或其他前端；仓库当前无需运行时配置或服务部署，故不创建空 `config/`、`deploy/`、`clients/`。
@@ -59,10 +59,10 @@ React/Vite 或其他前端；仓库当前无需运行时配置或服务部署，
 | UPG-033 | 中文学习、流程、功能和运维文档 | README、`docs/` | 开发运维 | 低 | 操作者可能把开发期“无升级边”误解成自动升级 | 链接、CLI help、支持矩阵抽查 |
 | UPG-034 | Sentinel/Dufs 当前组合备份完整闭包 | `backup-current`/`verify-current`/`restore-current`/`recover-current` | 核心 | 高 | 只处理 SQLite 会丢失配置、树和密钥绑定 | support JSON、exact resource set、配置同代替换与 recovery 集成测试 |
 | UPG-035 | 所有历史升级边当前均未实现；未来稳定 edge 只归本仓库 | `upgrade_edges=[]`，无历史 SQL/adapter/CLI；未来准入必须在 `sarmg-upgrade` 以独立 adapter/fixture/CLI/release 原子加入 | 核心 | 高 | 当前用户必须重新部署开发数据；删除此边界或暗示另有迁移仓会诱发手工改库、current restore 冒充升级或职责分裂 | 当前源码/CLI/support 无历史 edge；未来变更同时具备精确 source/target、不可变 source backup、transform、故障矩阵、recovery、support 与 release，且产品 runtime 无兼容代码 |
-| UPG-036 | Foundation 当前线协议绑定 | `sarmg-contracts`、`sarmg-schema-identity` 均精确 `=0.9.1` + Git rev `84966364c5b4662104e05741b3045482e4fd4fc8`；`SchemaIdentity`/resource/external requirement 直接复用 | 保障 | 高 | 本工具会悄悄形成第二套字段、数值范围或枚举，跨项目备份无法可靠互认 | Foundation fixtures + 本仓库更严格负例 |
+| UPG-036 | Foundation 当前线协议绑定 | `sarmg-contracts`、`sarmg-schema-identity` 均精确 `=0.9.2` + Git rev `0174fc1b6ffcdf876e6dc7c715f107266582410e`；`SchemaIdentity`/resource/external requirement 直接复用 | 保障 | 高 | 本工具会悄悄形成第二套字段、数值范围或枚举，跨项目备份无法可靠互认 | Foundation fixtures + 本仓库更严格负例 |
 | UPG-037 | Driver-independent schema identity | `ProductMetadataRow/Column`、`SchemaRow`、canonical fingerprint | 保障 | 高 | DDL、列形状和摘要 framing 再次散落，算法修复无法一次覆盖所有消费者 | 空/多 metadata row、列漂移、fingerprint mismatch |
 | UPG-038 | rusqlite 安全适配层 | `verify_schema_identity_database`、read-only open、integrity/FK、canonical schema query | 核心 | 高 | Foundation 会被迫依赖 rusqlite，或工具只验证自报 metadata 而不验证真实数据库 | 精确当前库、错 revision/hash、任意 schema drift；不含 migration-ledger 特判 |
-| UPG-039 | 不可变 Foundation 依赖且无 fallback | Cargo 中四个 Foundation crate 均精确 `=0.9.1`，Git rev `84966364c5b4662104e05741b3045482e4fd4fc8` | 开发运维 | 中 | 同一源码可能因依赖来源变化而形成不同持久化合同 | `cargo metadata`、lockfile、clean checkout locked build |
+| UPG-039 | 不可变 Foundation 依赖且无 fallback | Cargo 中四个 Foundation crate 均精确 `=0.9.2`，Git rev `0174fc1b6ffcdf876e6dc7c715f107266582410e` | 开发运维 | 中 | 同一源码可能因依赖来源变化而形成不同持久化合同 | `cargo metadata`、lockfile、clean checkout locked build |
 | UPG-040 | 正式发行唯一 target `x86_64-unknown-linux-gnu` | `src/support.rs::FORMAL_RELEASE_TARGET`、release scripts | 保障 | 中 | 非 AMD64/非 GNU 平台会被误认为受支持并进入事故矩阵 | `support --json.formal_release_target` 精确值；发布归档命名；不声明 ARM/musl/其他 OS |
 | UPG-041 | 工具是离线 CLI，无 Server、daemon、HTTP API 或前端 | `src/main.rs`、仓库结构 | 核心 | 中 | 引入常驻服务会新增认证、网络、并发和密钥暴露面 | 只存在 CLI subcommand；无 listener、React/Vite、`clients/`；Dufs 前端例外与本工具无关 |
 | UPG-042 | 当前无运行时配置和服务部署目录 | CLI 参数、仓库根 | 开发运维 | 低 | 新建空 `config/`/`deploy/` 会暗示不存在的配置或服务合同 | 所有产品/路径/key/动作逐次显式传入；无环境变量 fallback；未来确有配置再建立当前目录 |

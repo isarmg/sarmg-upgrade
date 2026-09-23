@@ -1,6 +1,6 @@
 # Sarmg Upgrade 文档总览
 
-本文档集描述当前 `0.3.3` 二进制。`support --json` 是能力的唯一权威；catalog 表示产品状态资源，不
+本文档集描述当前 `0.3.4` 二进制。`support --json` 是能力的唯一权威；catalog 表示产品状态资源，不
 代表每个产品一定存在某项命令。正式工具唯一目标为 Linux AMD64 GNU `x86_64-unknown-linux-gnu`；本仓库
 是无常驻进程、无前端的离线 CLI，因此没有 React/Vite 客户端，也不创建空 `config/`/`deploy/` 目录。
 
@@ -13,7 +13,7 @@
 | 运维 | [operations.md](operations.md) | 命令、停机、权限、备份、恢复、演练和发行 |
 
 共享协议与产品工具的边界见[功能清单 2.1 节](feature-inventory-and-tradeoffs.md#21-foundation-与本工具的责任边界)：
-Foundation 的 `sarmg-contracts`、`sarmg-schema-identity`、`sarmg-secret`、`sarmg-secret-envelope` 均以 `=0.9.1` 和不可变 Git rev
-`84966364c5b4662104e05741b3045482e4fd4fc8` 提供 driver-independent 当前线类型和 schema 算法；本仓库
+Foundation 的 `sarmg-contracts`、`sarmg-schema-identity`、`sarmg-secret`、`sarmg-secret-envelope` 均以 `=0.9.2` 和不可变 Git rev
+`0174fc1b6ffcdf876e6dc7c715f107266582410e` 提供 driver-independent 当前线类型和 schema 算法；本仓库
 拥有 rusqlite、产品版本、文件系统、密钥认证策略与恢复状态机。开发与发行不得
 改用 workspace sibling、Cargo path dependency、可变 branch 或本地副本。

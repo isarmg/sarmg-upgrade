@@ -2,7 +2,7 @@
 
 ## 7.1 先区分“未来设计”与“当前功能”
 
-历史 edge 是一个精确 source version 到精确 target version 的有向转换。`sarmg-upgrade 0.3.3` 当前没有
+历史 edge 是一个精确 source version 到精确 target version 的有向转换。`sarmg-upgrade 0.3.4` 当前没有
 任何 edge：`support --json` 的数组为空，CLI 不注册 `upgrade-*`，源码也没有旧 Schema SQL/parser。
 本章后半解释未来准入标准，不表示命令已经存在。
 
@@ -58,8 +58,8 @@ rg 'upgrade-|from-version|to-version' src
 trigger，缺失对象或 DDL 变化都会自然产生不同摘要，并在任何备份发布或恢复 mutation 前拒绝。这样既能阻止
 “表看起来相似”的开发数据库混入当前备份，也不会为了某个旧实现留下特殊兼容代码。
 
-共享 `sarmg-contracts =0.9.1` 和 `sarmg-schema-identity =0.9.1` 同样只描述当前协议；两者只从不可变
-Git rev `84966364c5b4662104e05741b3045482e4fd4fc8` 取得。精确依赖的意义是让各项目对当前 manifest、metadata
+共享 `sarmg-contracts =0.9.2` 和 `sarmg-schema-identity =0.9.2` 同样只描述当前协议；两者只从不可变
+Git rev `0174fc1b6ffcdf876e6dc7c715f107266582410e` 取得。精确依赖的意义是让各项目对当前 manifest、metadata
 和 fingerprint 使用同一事实，并不意味着 Foundation 能读取 0.2 或 0.1 数据库。不得改用 workspace sibling、
 Cargo path dependency、可变 branch 或本地旧类型，也不得加入 serde alias、双算法比对或“先新后旧”parser；
 未来历史输入只能由本仓库中精确绑定 source/target 的独立 edge adapter 处理，不能扩宽 current parser。
