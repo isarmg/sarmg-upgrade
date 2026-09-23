@@ -22,8 +22,7 @@ git diff --check
 
 ## 8.2 Fixture 原则
 
-当前 fixture 由对应产品的 current Schema 事实生成并固定 identity；仓库现有
-`tests/fixtures/current/host-monitoring.sql` 与 `sunshine-manager.sql` 用于证明 code allowlist。当前没有历史
+当前 fixture 固定五个 Server 的 current Schema 与指纹，位于 `tests/fixtures/current/`，用于证明 code allowlist。当前没有历史
 source fixture，这一点与 `upgrade_edges=[]` 一致。若未来真正增加历史 edge，source fixture 才必须来自该
 精确历史发行事实，target 仍由 current target SQL/code 从零创建。
 

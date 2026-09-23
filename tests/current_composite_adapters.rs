@@ -224,6 +224,45 @@ fn composite_adapter_rejects_wrong_resource_sets() {
 }
 
 #[test]
+fn dufs_backup_rejects_a_database_bound_to_another_shared_root() {
+    let temporary = tempfile::tempdir().unwrap();
+    let database_path = temporary.path().join("dufs.sqlite3");
+    let bound_tree = temporary.path().join("bound-tree");
+    let selected_tree = temporary.path().join("selected-tree");
+    fs::create_dir(&bound_tree).unwrap();
+    fs::create_dir(&selected_tree).unwrap();
+    database(
+        &database_path,
+        include_str!("fixtures/current/dufs-ram.sql"),
+        Product::DufsRam.slug(),
+        "0.51.0",
+        1,
+        "3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423",
+    );
+    bind_dufs(&database_path, &bound_tree);
+    let configuration = temporary.path().join("dufs.yaml");
+    fs::write(&configuration, b"auth: test").unwrap();
+    let output = temporary.path().join("backup");
+    assert!(
+        backup_current(&CompositeCurrentOptions {
+            product: Product::DufsRam,
+            database: database_path,
+            tree: selected_tree,
+            output: output.clone(),
+            runtime_directory: None,
+            configuration: vec![NamedFile {
+                name: "dufs.yaml".into(),
+                path: configuration
+            }],
+            credentials_key_id: None,
+            credentials_key: None,
+        })
+        .is_err()
+    );
+    assert!(!output.exists());
+}
+
+#[test]
 fn composite_restore_replaces_configuration_with_the_same_generation() {
     let temporary = tempfile::tempdir().unwrap();
     let schema = include_str!("fixtures/current/dufs-ram.sql");

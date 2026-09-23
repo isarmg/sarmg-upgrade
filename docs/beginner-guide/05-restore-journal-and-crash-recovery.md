@@ -12,7 +12,7 @@ existing` 是明确授权，不表示可跳过 preserved original 或路径检�
 
 `--expect-version` 用于 SQLite restore/recover，以及 Media recover 的 current 版本二次确认。Media 首次
 `restore-media` 已由输入 manifest 精确限定 current version，因此没有该参数。任何位置的
-`--expect-version` 都不会选择迁移路径，也不会让 `0.6.0 -> 0.8.0` 发生转换。
+`--expect-version` 只核对当前状态身份，不选择迁移路径或执行跨版本转换。
 
 ## 5.2 Stage
 
@@ -27,8 +27,10 @@ stage 不是可供产品启动的半成品位置。操作者不得把服务配�
 journal 记录工具/产品/版本/adapter/Schema identity/时间、source backup 的规范路径与 inode/path identity、
 manifest version/time/bytes/SHA、source tree identity、database/tree 目标与父路径 identity、由同 nonce 推导的
 original/incoming sibling 名称、incoming 与 optional original 的 DB/tree 完整内容 inventory、阶段和预期 Hash。
-它先于第一次目标 mutation 持久化，并在每阶段更新后同步目录。Media current journal 最大 272 MiB、唯一版本
-为 3；缺失字段会被拒绝。`configuration` 和 `external_requirements` 必须精确为 `[]`。
+它先于第一次目标 mutation 持久化，并在每阶段更新后同步目录。组合恢复 journal 最大 272 MiB、唯一版本
+为 4；缺失字段会被拒绝。Media 的 `configuration` 和 `external_requirements` 必须精确为 `[]`。
+Dufs journal 还区分源数据库摘要与重绑定到目标 shared root 后的数据库摘要，并记录目标设备号/inode；
+recover 会从源备份重算变换结果并核对已安装目录身份。
 
 journal 的安全意义有三层：
 
@@ -45,7 +47,7 @@ nonce 精确推导。recover 比对六项 CLI 输入后，取得 database/tree �
 再验证全部 source/manifest/stage/target/original 证据。锁内 pending journal 属于未提交更新，会被丢弃；
 已持久化 `rollback-started` 后不能改选 commit。重复相同 action 可幂等推进，但每次 cleanup 前仍会重验证证据。
 
-Media v3 journal 精确绑定 Cargo tool version，但不内嵌 release binary SHA。工具会拒绝不同 tool version；
+Media v4 journal 精确绑定 Cargo tool version，但不内嵌 release binary SHA。工具会拒绝不同 tool version；
 同版本制品是否真是同一受信 bytes，仍必须由操作者用变更单、签名和 binary SHA 证明，不能从 journal 推断。
 
 ## 5.4 安装阶段
@@ -90,7 +92,7 @@ commit 的前提是操作者选择保留 incoming 作为正式目标。工具仍
 保持所有服务停止；保存错误和 binary SHA；不移动/编辑 recovery，也不移动、替换或重新封装原 source
 backup；修复空间/挂载/key 等环境问题；用
 完全相同产品、版本、路径和身份运行对应 `recover-* --action commit|rollback`。Media 命令不会从 journal
-替操作者猜上下文，必须重新显式提供 `--expect-version 0.2.0`、原 `--input`、原 `--database`、原
+替操作者猜上下文，必须重新显式提供 `--expect-version 0.3.0`、原 `--input`、原 `--database`、原
 `--data-dir` 与错误报告中的 `--recovery`；工具再逐项比对并取得 DB/tree 两把排他锁。
 
 建议按以下顺序记录与决策：
@@ -121,8 +123,8 @@ backup；修复空间/挂载/key 等环境问题；用
 
 | 操作对象 | recover 命令 | 当前允许 | 不能做什么 |
 |---|---|---|---|
-| Media restore | `recover-media-restore --expect-version 0.2.0 --input BACKUP --database DB --data-dir TREE --recovery RECOVERY --action commit\|rollback` | `commit` / `rollback` | 六项参数都必填且路径必须与 journal 精确一致；不接受 Sentinel/Dufs，不拆分 DB/tree |
-| Host SQLite restore | `recover-sqlite --product host-monitoring --expect-version 0.8.0` | `commit` / `rollback` | 不接受其他 product/version |
+| Media restore | `recover-media-restore --expect-version 0.2.2 --input BACKUP --database DB --data-dir TREE --recovery RECOVERY --action commit\|rollback` | `commit` / `rollback` | 六项参数都必填且路径必须与 journal 精确一致；不接受 Sentinel/Dufs，不拆分 DB/tree |
+| Host SQLite restore | `recover-sqlite --product host-monitoring --expect-version 0.9.26` | `commit` / `rollback` | 不接受其他 product/version |
 | Sunshine SQLite restore | 无 | 事件保全与人工升级 | 不得假装 Host、不得缺 key 续接 |
 | Sentinel/Dufs composite restore | `recover-current --product PRODUCT --expect-version VERSION --input BACKUP --database DB --data-dir TREE --recovery RECOVERY --action commit\|rollback` | `commit` / `rollback` | product/version/path/key 必须与 journal 精确一致 |
 | historical upgrade | 无 edge/命令 | 不适用 | 不得把 restore recovery 称为 upgrade recovery |

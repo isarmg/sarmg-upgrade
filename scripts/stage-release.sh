@@ -75,7 +75,8 @@ cat >"$output/package/release.json" <<EOF
   "binary_sha256": "${binary_sha}",
   "catalog_sha256": "${catalog_sha}",
   "release_signing_public_key_sha256": "${release_signing_public_key_sha}",
-  "manifest_versions": [2],
+  "manifest_versions": [2, 3],
+  "composite_restore_journal_version": 4,
   "supported_capabilities": ${capabilities}
 }
 EOF

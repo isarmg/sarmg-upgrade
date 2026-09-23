@@ -26,17 +26,17 @@ sarmg-upgrade inspect-manifest /backup/manifest.json
 sarmg-upgrade backup-media \
   --database /var/lib/isarmg/media-backup/db/app.db \
   --data-dir /var/lib/isarmg/media-backup/data \
-  --output /srv/backup/media-backup-0.2.0-20260830
+  --output /srv/backup/media-backup-0.3.0-20260830
 
 sarmg-upgrade verify-media-backup \
-  --input /srv/backup/media-backup-0.2.0-20260830
+  --input /srv/backup/media-backup-0.3.0-20260830
 ```
 
 恢复到新目标的演练：
 
 ```bash
 sarmg-upgrade restore-media \
-  --input /srv/backup/media-backup-0.2.0-20260830 \
+  --input /srv/backup/media-backup-0.3.0-20260830 \
   --database /srv/restore-test/media/app.db \
   --data-dir /srv/restore-test/media/data
 ```
@@ -46,8 +46,8 @@ recovery 路径：
 
 ```bash
 sarmg-upgrade recover-media-restore \
-  --expect-version 0.2.0 \
-  --input /srv/backup/media-backup-0.2.0-20260830 \
+  --expect-version 0.3.0 \
+  --input /srv/backup/media-backup-0.3.0-20260830 \
   --database /var/lib/isarmg/media-backup/db/app.db \
   --data-dir /var/lib/isarmg/media-backup/data \
   --recovery /exact/path/from/error \
@@ -64,16 +64,16 @@ sarmg-upgrade recover-media-restore \
 sarmg-upgrade backup-sqlite \
   --product host-monitoring \
   --database /var/lib/isarmg/host-monitoring/db/host-monitoring.sqlite3 \
-  --output /srv/backup/host-monitoring-0.8.0-20260830
+  --output /srv/backup/host-monitoring-0.9.26-20260830
 
 sarmg-upgrade verify-sqlite \
   --product host-monitoring \
-  --input /srv/backup/host-monitoring-0.8.0-20260830
+  --input /srv/backup/host-monitoring-0.9.26-20260830
 
 sarmg-upgrade restore-sqlite \
   --product host-monitoring \
-  --expect-version 0.8.0 \
-  --input /srv/backup/host-monitoring-0.8.0-20260830 \
+  --expect-version 0.9.26 \
+  --input /srv/backup/host-monitoring-0.9.26-20260830 \
   --database /var/lib/isarmg/host-monitoring/db/host-monitoring.sqlite3 \
   --replace-existing
 ```
@@ -83,7 +83,7 @@ Host restore 中断可显式恢复：
 ```bash
 sarmg-upgrade recover-sqlite \
   --product host-monitoring \
-  --expect-version 0.8.0 \
+  --expect-version 0.9.26 \
   --recovery /exact/path/from/error \
   --action commit
 ```
@@ -96,21 +96,21 @@ Sunshine 命令在 Host 参数基础上必须同时提供当前 key ID 和私有
 sarmg-upgrade backup-sqlite \
   --product sunshine-manager \
   --database /var/lib/isarmg/sunshine-manager/db/sunshine-manager.sqlite3 \
-  --output /srv/backup/sunshine-manager-0.8.0-20260902 \
+  --output /srv/backup/sunshine-manager-0.10.1-20260902 \
   --credentials-key-id current-key-1 \
   --credentials-key-file /run/credentials/sunshine-manager.key
 
 sarmg-upgrade verify-sqlite \
   --product sunshine-manager \
-  --input /srv/backup/sunshine-manager-0.8.0-20260902 \
+  --input /srv/backup/sunshine-manager-0.10.1-20260902 \
   --credentials-key-id current-key-1 \
   --credentials-key-file /run/credentials/sunshine-manager.key
 ```
 
 key 文件内容为 Base64 编码的精确 32 bytes；文件必须为单硬链接普通文件、无 group/other 权限、读取中
-身份和元数据不变。原始 key 不进入备份、manifest 或输出。工具会实际认证全部非 NULL Host `secret` 和
-全部非 NULL operation `request_ciphertext`，不按 operation 完成状态过滤，也不只比较 key ID。当前
-AES-256-GCM envelope 使用 12-byte nonce，并严格校验产品域、对象 ID、action 与字段域的长度分帧 AAD。
+身份和元数据不变。原始 key 不进入备份、manifest 或输出。工具会认证 `devices.authorization_code_enc`
+以及 `_sarmg_operations.request_payload` 内的密文，并核对授权码/请求指纹；不按 operation 状态过滤。
+当前密文使用 Foundation `sarmg-secret-envelope` 格式，分别绑定 device ID 或 operation ID、action 与字段域。
 
 恢复也必须提供同一组 key 参数。Sunshine restore 的中断 recovery 当前未列为对外支持能力：遇到残留时
 保持服务停止、保全目录和日志，禁止调用 Host recovery 或手工替换文件。
@@ -155,13 +155,13 @@ Secret；不得同时接受新旧两把 key，也不得从下载归档本身建�
 
 Foundation 依赖是发布输入而不是运行时服务。发行前另行核对：
 
-1. `sarmg-contracts` 与 `sarmg-schema-identity` 均精确为 `=0.9.1`，Git rev 精确为
+1. `sarmg-contracts`、`sarmg-schema-identity`、`sarmg-secret` 与 `sarmg-secret-envelope` 均精确为 `=0.9.1`，Git rev 精确为
    `84966364c5b4662104e05741b3045482e4fd4fc8`；
 2. `Cargo.lock` 中没有第二版本，也没有 registry/path fallback 或可漂移 branch；
 3. `cargo test --locked --all-targets --all-features` 覆盖 shared manifest parser、metadata column/row adapter、
    schema fingerprint 和本仓库产品级负例；
-4. SBOM/provenance 同时记录两个 crate 的版本与来源 revision；
-5. 从 clean checkout 离线复建后，Host/Sunshine/Media fixture 的 SHA 与 code-owned official identity 相等；
+4. SBOM/provenance 同时记录四个 crate 的版本与来源 revision；
+5. 从 clean checkout 离线复建后，五个 Server Schema fixture 的 SHA 与 code-owned official identity 相等；
 6. `support --json` 中仍不存在历史 edge，CLI 中不存在 `upgrade-*` 命令。
 7. staged `RELEASE-SIGNING-PUBLIC.pem`、源码公钥、`release.json` 指纹与 Secret 私钥派生公钥四者一致。
 
@@ -217,15 +217,19 @@ sarmg-upgrade catalog --json
 
 | 产品 | version | revision | canonical schema SHA-256 | 当前能力 |
 |---|---:|---:|---|---|
-| Media Backup | `0.2.0` | 1 | `2563e6afc3fff272d02b7a5615272cc773862243bfd15aec51655abf1d9c6b1c` | composite backup/verify/restore/recover |
-| Host Monitoring | `0.8.0` | 1 | `12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05` | SQLite backup/verify/restore/recover |
-| Sunshine Manager | `0.8.0` | 2 | `c9dedb33dd7a5ad613e762eb135a7aa5184ce1df52166459bee7b3485b4b3be3` | keyed SQLite backup/verify/restore；无 recover |
-| Sentinel Monitor | `0.2.0` | 1 | `f547ddc817d830d23b5305bb1f88b29898d6531568edd6eb194c2b629eb560c0` | DB/recordings/三个配置/key 组合 backup/verify/restore/recover |
-| Dufs RAM | `0.50.1` | 1 | `3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423` | DB/shared root/`dufs.yaml` 组合 backup/verify/restore/recover |
+| Media Backup | `0.3.0` | 5 | `a07c5723568cfcbf379a2173225122dc5db4e2168a50700d7f256aba3de5957e` | composite backup/verify/restore/recover |
+| Host Monitoring | `0.9.26` | 7 | `5c4a32f3f1813e6e6ef528b55e25e912bfe0191f79332ad5538943746c8f17a3` | SQLite backup/verify/restore/recover |
+| Sunshine Manager | `0.10.1` | 7 | `1acc8f2d9fac7ec4e973dd7e43cf5099e4a0b713b58a59e4969797602030d5d2` | keyed SQLite backup/verify/restore；无 recover |
+| Sentinel Monitor | `0.2.2` | 7 | `bb64805d1434fa953b5a215c636c086d98bce467825f7e9b6d3a5c1c0bd359c4` | DB/recordings/三个配置/key 组合 backup/verify/restore/recover |
+| Dufs RAM | `0.51.0` | 1 | `3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423` | DB/shared root/`dufs.yaml` 组合 backup/verify/restore/recover |
 
 这些值用于核对 binary/code/release，不是允许手写进数据库或 manifest 的“修复参数”。工具会从实际
 `sqlite_schema` 计算 fingerprint，并检查 `product_metadata` 五列/单行和 integrity/FK。任何额外对象都会
 自然改变 fingerprint；没有 `_sqlx_migrations` 或其他旧表名特判。
+
+Dufs 的 `store_meta` 记录共享目录的设备号和 inode。备份要求它们等于源目录；恢复在暂存阶段把数据库重绑定到新目录，
+journal v4 分别记录源数据库摘要和重绑定后摘要。中断续接时会从源备份重新计算重绑定结果，并核对暂存或已安装目录的设备号/inode。
+对未来状态版本，保持相同持久化身份的 Server 可沿用这些命令；身份或资源合同变化后需发布带精确迁移边的新工具版本。
 
 ## 14. 备份集布局与完成判定
 
@@ -279,7 +283,7 @@ Media 的 DB/tree 必须同时不存在或同时存在；混合代在 mutation �
 
 ## 16. Recovery 决策矩阵
 
-Media 只接受 current journal v3。读写共用 272 MiB 硬上限，可覆盖两个已验收最大树 inventory
+组合恢复只接受 current journal v4。读写共用 272 MiB 硬上限，可覆盖两个已验收最大树 inventory
 与固定元数据；完整序列化结果会在创建 journal 或替换任何目标前检查，超限时目标保持不变。journal 绑定 tool/product/version/adapter/Schema/time、
 source backup 规范路径+inode/path identity、manifest version/time/bytes/SHA、source tree identity、database/tree
 目标及父路径 identity、同 nonce 精确推导的 stage/original、incoming/optional original 的 DB/tree 完整 inventory、

@@ -84,11 +84,11 @@ macOS 或 Windows 上“能够编译/启动”不构成支持。该工具是一�
 
 | 产品 | current identity | backup / verify / restore | recover | 说明 |
 |---|---|---|---|---|
-| Media Backup | `0.2.0` / r1 / `2563e6afc3fff272d02b7a5615272cc773862243bfd15aec51655abf1d9c6b1c` | 是，DB + tree 专用命令 | 是 | 两类资源必须同代处理 |
-| Host Monitoring | `0.8.0` / r1 / `12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05` | 是，SQLite-only | 是 | Client 本地状态不在 Server backup 内 |
-| Sunshine Manager | `0.8.0` / r2 / `c9dedb33dd7a5ad613e762eb135a7aa5184ce1df52166459bee7b3485b4b3be3` | 是，keyed SQLite-only | 否 | backup/verify/restore 必须提供 external key |
-| Sentinel Monitor | `0.2.0` / r1 / `f547ddc817d830d23b5305bb1f88b29898d6531568edd6eb194c2b629eb560c0` | 是，composite current | 是 | DB/recordings/三配置/key 精确同代 |
-| Dufs RAM | `0.50.1` / r1 / `3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423` | 是，composite current | 是 | DB/shared root/`dufs.yaml` 精确同代 |
+| Media Backup | `0.3.0` / r5 / `a07c5723568cfcbf379a2173225122dc5db4e2168a50700d7f256aba3de5957e` | 是，DB + tree 专用命令 | 是 | 两类资源必须同代处理 |
+| Host Monitoring | `0.9.26` / r7 / `5c4a32f3f1813e6e6ef528b55e25e912bfe0191f79332ad5538943746c8f17a3` | 是，SQLite-only | 是 | Client 本地状态不在 Server backup 内 |
+| Sunshine Manager | `0.10.1` / r7 / `1acc8f2d9fac7ec4e973dd7e43cf5099e4a0b713b58a59e4969797602030d5d2` | 是，keyed SQLite-only | 否 | backup/verify/restore 必须提供 external key |
+| Sentinel Monitor | `0.2.2` / r7 / `bb64805d1434fa953b5a215c636c086d98bce467825f7e9b6d3a5c1c0bd359c4` | 是，composite current | 是 | DB/recordings/三配置/key 精确同代 |
+| Dufs RAM | `0.51.0` / r1 / `3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423` | 是，composite current | 是 | DB/shared root/`dufs.yaml` 精确同代 |
 | Sarmg Foundation | 无 runtime state | 不适用 | 不适用 | 源码与 package 由 Git/registry 管理 |
 
 表中的 SHA 是 code-owned current identity，供审计和 fixture 校验；它不是让操作者写入 metadata 或修改

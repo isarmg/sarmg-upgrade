@@ -9,21 +9,23 @@ sarmg-upgrade 0.3.0
 │  ├─ support --json
 │  ├─ catalog --json
 │  └─ inspect-manifest
-├─ Media Backup 0.2.0 当前组合状态
+├─ Media Backup 0.3.0 当前组合状态
 │  ├─ backup-media
 │  ├─ verify-media-backup
 │  ├─ restore-media
 │  └─ recover-media-restore
 ├─ 当前 SQLite-only 状态
-│  ├─ Host Monitoring 0.8.0：backup / verify / restore / recover
-│  └─ Sunshine Manager 0.8.0：keyed backup / verify / restore
+│  ├─ Host Monitoring 0.9.26：backup / verify / restore / recover
+│  └─ Sunshine Manager 0.10.1：keyed backup / verify / restore
 ├─ 当前组合状态
-│  ├─ Sentinel Monitor 0.2.0：DB / recordings / 三个配置 / key
-│  └─ Dufs RAM 0.50.1：DB / shared root / dufs.yaml
-├─ Foundation 共享合同：两个 crate 均为 =0.9.1
-│  └─ immutable Git rev：84966364c5b4662104e05741b3045482e4fd4fc8
+│  ├─ Sentinel Monitor 0.2.2：DB / recordings / 三个配置 / key
+│  └─ Dufs RAM 0.51.0：DB / shared root / dufs.yaml
+├─ Foundation 共享合同：四个 crate 均为 =0.9.1
+│  ├─ immutable Git rev：84966364c5b4662104e05741b3045482e4fd4fc8
 │  ├─ sarmg-contracts：manifest / resource / external requirement / SchemaIdentity
-│  └─ sarmg-schema-identity：metadata row/column / canonical query / fingerprint
+│  ├─ sarmg-schema-identity：metadata row/column / canonical query / fingerprint
+│  ├─ sarmg-secret：受保护的密钥字节
+│  └─ sarmg-secret-envelope：认证密封格式
 ├─ 暂未实现
 │  └─ 所有历史升级 edge
 └─ 交付
@@ -117,8 +119,8 @@ Host 的 SQLite restore 可用 `recover-sqlite`。Media 使用 `recover-media-re
 SQLite restore 当前不对外声明 recover；若出现无法自动清理的 recovery，停止并保全证据，不要用 Host
 命令绕过密文认证。
 
-Media recovery 不从 journal 自动选择上下文：CLI 必须重新提供 exact `--expect-version 0.2.0`、source
-`--input`、目标 `--database/--data-dir`、`--recovery` 和 `--action commit|rollback`。工具比对 v3 journal 后，对目标 DB/tree 两个
+Media recovery 不从 journal 自动选择上下文：CLI 必须重新提供 exact `--expect-version 0.3.0`、source
+`--input`、目标 `--database/--data-dir`、`--recovery` 和 `--action commit|rollback`。工具比对 v4 journal 后，对目标 DB/tree 两个
 sibling lock 取得 non-blocking exclusive 锁，再验证 source manifest、路径 identity、incoming/original
 inventory 与 phase。source backup 绑定规范绝对路径和目录 dev/inode，不能在中断后移动、替换或拿内容相同
 的副本顶替。CLI 不暴露可伪造的 product/runtime 参数：命令内部把 product 固定为 `media-backup`，当前
@@ -163,7 +165,7 @@ clean checkout + annotated exact tag
 | `support [--json]` | 无产品输入 | `support_matrix()` | 此 binary 编译进的 current capability 与正式 target | catalog 中的资源描述自动等于可执行能力 |
 | `catalog [--json]` | 无产品输入 | `Product::contract()` | 六个产品的持久资源边界 | 某资源已有 backup/restore adapter |
 | `inspect-manifest PATH` | Foundation SQLite manifest | `BackupManifest::read` | JSON、共享字段、产品策略、相对路径、排序可解析 | Media manifest、资源字节、hash、Schema、key；该入口最多读取 1 MiB 清单，拒绝特殊文件及末级符号链接 |
-| `backup-media` | Media 0.2.0 | `backup_current` | DB+tree 同一 current generation 已不可变发布并复验 | 任意其他 Media 版本或历史转换 |
+| `backup-media` | Media 0.3.0 | `backup_current` | DB+tree 同一 current generation 已不可变发布并复验 | 任意其他 Media 版本或历史转换 |
 | `verify-media-backup` | Media current composite backup | `verify_current_backup` | DB identity、tree inventory、manifest 全部相符 | 源生产路径此刻仍与备份相同 |
 | `restore-media` | 全新目标或显式 replace | `restore_current` | current DB+tree 已成组安装并验证 | 服务已停止、业务 smoke 已通过 |
 | `recover-media-restore` | 显式 `--expect-version/--input/--database/--data-dir/--recovery/--action` 六项 | `recover_current` | 显式 current 上下文与严格 journal/磁盘证据一致后，选择的 commit/rollback 完成 | 省略 source/target/recovery/action、随意更换 binary/路径或编辑 journal |
@@ -172,7 +174,7 @@ clean checkout + annotated exact tag
 | `backup-sqlite` | 仅 Host/Sunshine current | `create_sqlite_backup*` | online snapshot、identity、hash；Sunshine 还证明密文可认证 | Media/Sentinel/Dufs 已完整备份 |
 | `verify-sqlite` | 仅 Host/Sunshine current backup | `verify_sqlite_backup*` | exact 两文件目录、manifest、DB、key 合同 | 目标路径可安全 replace |
 | `restore-sqlite` | Host/Sunshine exact expect-version | `restore_sqlite_backup*` | 当前 DB 已按 durable journal 安装并验证 | Sunshine 中断 recovery 已受支持 |
-| `recover-sqlite` | 仅 Host 0.8.0 | `recover_sqlite_restore` | original/incoming 位置和 hash 可证明后完成动作 | 可用于 Sunshine 或其他产品 |
+| `recover-sqlite` | 仅 Host 0.9.26 | `recover_sqlite_restore` | original/incoming 位置和 hash 可证明后完成动作 | 可用于 Sunshine 或其他产品 |
 
 CLI 不读取运行时配置文件，也没有环境变量 fallback。仓库因此没有空的 `config/`、`deploy/` 或 `clients/`：
 这不是遗漏，而是离线 CLI 当前边界。若未来增加常驻 Server 或前端，必须作为新的产品面重新设计，不能把
@@ -198,11 +200,11 @@ CLI 不读取运行时配置文件，也没有环境变量 fallback。仓库因�
 
 | 产品 | version | revision | schema SHA-256 |
 |---|---:|---:|---|
-| Media Backup | `0.2.0` | 1 | `2563e6afc3fff272d02b7a5615272cc773862243bfd15aec51655abf1d9c6b1c` |
-| Host Monitoring | `0.8.0` | 1 | `12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05` |
-| Sunshine Manager | `0.8.0` | 2 | `c9dedb33dd7a5ad613e762eb135a7aa5184ce1df52166459bee7b3485b4b3be3` |
-| Sentinel Monitor | `0.2.0` | 1 | `f547ddc817d830d23b5305bb1f88b29898d6531568edd6eb194c2b629eb560c0` |
-| Dufs RAM | `0.50.1` | 1 | `3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423` |
+| Media Backup | `0.3.0` | 5 | `a07c5723568cfcbf379a2173225122dc5db4e2168a50700d7f256aba3de5957e` |
+| Host Monitoring | `0.9.26` | 7 | `5c4a32f3f1813e6e6ef528b55e25e912bfe0191f79332ad5538943746c8f17a3` |
+| Sunshine Manager | `0.10.1` | 7 | `1acc8f2d9fac7ec4e973dd7e43cf5099e4a0b713b58a59e4969797602030d5d2` |
+| Sentinel Monitor | `0.2.2` | 7 | `bb64805d1434fa953b5a215c636c086d98bce467825f7e9b6d3a5c1c0bd359c4` |
+| Dufs RAM | `0.51.0` | 1 | `3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423` |
 
 任何额外表/index/trigger、缺失对象或 DDL 变化都通过同一 fingerprint 自然拒绝。代码没有、也不应新增
 针对 `_sqlx_migrations` 或其他“旧表名”的特殊分支；否则 current identity 之外又会出现隐式兼容规则。
@@ -316,10 +318,10 @@ private key file
  -> UTF-8 Base64 trim/decode -> exactly 32 bytes
  -> key ID 1..64 [A-Za-z0-9_-]
  -> compare manifest key requirement
- -> authenticate all current encrypted host/operation rows
+ -> authenticate all current encrypted device/operation rows
 ```
 
-manifest 只保存非秘密 `kid`、key SHA-256、`aes-256-gcm`、envelope version 1。key SHA 只绑定外部要求，
+manifest 只保存非秘密 `kid`、key SHA-256、`sarmg-secret-envelope-aes-256-gcm`、envelope version 1。key SHA 只绑定外部要求，
 不能替代真正解密认证。Sunshine 支持 backup/verify/restore，但 `support` 不声明 recover；restore 中断必须保全
 证据并停止，不能调用 Host 的 `recover-sqlite`。
 

@@ -20,7 +20,7 @@
 
 若每个产品运行时都携带历代数据库、配置、密文和路径兼容代码，新版本会不断扩大攻击面与测试矩阵。
 Sarmg 的策略是：产品二进制只理解一个当前世界；备份、恢复和未来确有必要的历史转换由停机运行的
-特权工具集中处理。当前仍在开发，尚无任何历史升级 adapter。
+特权工具集中处理。当前五个 Server 状态适配器已实现；跨版本转换边仍为空。
 
 ## 2. 五个核心概念
 
@@ -42,8 +42,8 @@ catalog。Foundation 没有 runtime state，所以 catalog 中存在但没有 ba
 
 ## 4. 当前实现范围
 
-Media Backup `0.2.0`、Sentinel Monitor `0.2.0` 和 Dufs RAM `0.50.1` 支持严格组合备份；
-Host Monitoring `0.8.0` 和 Sunshine Manager `0.8.0` 支持严格 SQLite-only 备份。所有历史升级 edge 均未实现。
+Media Backup `0.3.0`、Sentinel Monitor `0.2.2` 和 Dufs RAM `0.51.0` 支持严格组合备份；
+Host Monitoring `0.9.26` 和 Sunshine Manager `0.10.1` 支持严格 SQLite-only 备份。所有历史升级 edge 均未实现。
 自动化必须读取 `support --json`，不能根据 catalog 或本文推断命令。
 
 ## 5. 为什么先复制再解析
@@ -92,11 +92,11 @@ envelope version/Hash 要求。备份验证和恢复时重新提供受保护 key
 
 | 产品 | 当前 adapter | current identity | recover 边界 |
 |---|---|---|---|
-| Media Backup | SQLite + data tree 组合 adapter | `0.2.0` / r1 / `2563e6afc3fff272d02b7a5615272cc773862243bfd15aec51655abf1d9c6b1c` | 支持显式 commit/rollback |
-| Host Monitoring | SQLite-only adapter | `0.8.0` / r1 / `12dd1e61426b6b99df3d429b8c36ee3a5b22d1da776d98fc960b45b4f58c8e05` | 支持显式 commit/rollback |
-| Sunshine Manager | keyed SQLite-only adapter | `0.8.0` / r2 / `c9dedb33dd7a5ad613e762eb135a7aa5184ce1df52166459bee7b3485b4b3be3` | restore 可执行，但 recover 未对外支持 |
-| Sentinel Monitor | DB/recordings/三配置/key 组合 adapter | `0.2.0` / r1 / `f547ddc817d830d23b5305bb1f88b29898d6531568edd6eb194c2b629eb560c0` | `recover-current` commit/rollback |
-| Dufs RAM | DB/shared root/`dufs.yaml` 组合 adapter | `0.50.1` / r1 / `3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423` | `recover-current` commit/rollback |
+| Media Backup | SQLite + data tree 组合 adapter | `0.3.0` / r5 / `a07c5723568cfcbf379a2173225122dc5db4e2168a50700d7f256aba3de5957e` | 支持显式 commit/rollback |
+| Host Monitoring | SQLite-only adapter | `0.9.26` / r7 / `5c4a32f3f1813e6e6ef528b55e25e912bfe0191f79332ad5538943746c8f17a3` | 支持显式 commit/rollback |
+| Sunshine Manager | keyed SQLite-only adapter | `0.10.1` / r7 / `1acc8f2d9fac7ec4e973dd7e43cf5099e4a0b713b58a59e4969797602030d5d2` | restore 可执行，但 recover 未对外支持 |
+| Sentinel Monitor | DB/recordings/三配置/key 组合 adapter | `0.2.2` / r7 / `bb64805d1434fa953b5a215c636c086d98bce467825f7e9b6d3a5c1c0bd359c4` | `recover-current` commit/rollback |
+| Dufs RAM | DB/shared root/`dufs.yaml` 组合 adapter | `0.51.0` / r1 / `3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423` | `recover-current` commit/rollback |
 | Sarmg Foundation | 无运行时状态 | 不适用 | 不适用 |
 
 这些 SHA 是当前代码拥有的 allowlist，不是“同产品大致兼容”的版本提示。即使 manifest、metadata 与真实
