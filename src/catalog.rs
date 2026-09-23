@@ -15,6 +15,7 @@ pub enum Product {
     SunshineManager,
     SentinelMonitor,
     DufsRam,
+    #[serde(rename = "sarmg-foundation-server")]
     SarmgFoundation,
 }
 
@@ -129,6 +130,11 @@ mod tests {
     fn product_names_round_trip() {
         for product in Product::ALL {
             assert_eq!(product.slug().parse::<Product>().unwrap(), product);
+            assert_eq!(serde_json::to_value(product).unwrap(), product.slug());
+            assert_eq!(
+                serde_json::from_str::<Product>(&format!("\"{}\"", product.slug())).unwrap(),
+                product
+            );
         }
     }
 
