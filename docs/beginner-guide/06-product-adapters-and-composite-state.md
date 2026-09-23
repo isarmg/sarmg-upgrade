@@ -22,7 +22,7 @@
 
 当前 exact identity 是 `0.2.0` / revision 1 /
 `2563e6afc3fff272d02b7a5615272cc773862243bfd15aec51655abf1d9c6b1c`。adapter ID 固定为
-`media-backup-current-0.2.0-r1`，manifest 的唯一 current version 固定为 3；version 2 不再读取。
+`media-backup-current-0.2.0-r1`，manifest 的唯一 current version 固定为 3；仅接受 version 3。
 
 产品专用验证会读取数据库 `blobs` 与 `accounts`：组合 account/blob storage path，要求为安全相对路径，
 再确认树中是单硬链接普通文件、长度等于 `stored_size`、BLAKE3 等于 `content_blake3`。备份 tree inventory

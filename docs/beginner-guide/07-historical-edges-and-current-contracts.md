@@ -1,4 +1,4 @@
-# 07. 为什么当前没有历史升级 Edge
+# 07. 当前支持矩阵与升级 Edge 边界
 
 ## 7.1 先区分“未来设计”与“当前功能”
 
@@ -28,17 +28,13 @@
 
 可复用的 hash、backup、stage、restore journal 函数只能覆盖其中少量底层机制，不能补齐产品转换语义。
 
-## 7.3 为什么开发期删除 edge
+## 7.3 当前格式边界
 
-开发期 Schema、密文、目录和业务不变量仍可能快速变化。为每个试验版本保留 adapter，会让团队误以为
-这些格式已经承诺长期迁移，并迫使测试覆盖无实际用户价值的旧分支。更严重的是，旧 parser 和宽松转换
-会成为长期攻击面。因此开发数据默认重新部署；当前没有已支持 edge 时，即使数据不可重建，也不能用
-current restore、临时 SQL 或外部脚本冒充本工具已支持迁移。未来产品版本稳定后若确有长期迁移需求，
-精确 edge 只在本 `sarmg-upgrade` 仓库中以独立审核的 adapter、fixture、CLI 与 release 原子加入。
+工具只处理支持矩阵中明确列出的当前状态，不提供跨版本转换。遇到未支持的格式时保留源数据，停止恢复；
+`current restore`、临时 SQL 和外部脚本都不能作为本工具已支持迁移的证明。
 
-删除旧兼容不是“以后再试旧 parser”的延迟策略，而是 current-only 产品边界：不保留旧 DDL、migration
-ledger 特判、serde alias、旧 product slug、双 fingerprint 算法、旧命令 alias 或环境变量 fallback。这样每个
-正式版本只测试一个世界，安全审查也不需要证明所有历史宽松路径都不会绕过当前验证。
+产品运行时只接受自身当前格式；备份与恢复不通过旧 DDL、serde alias、旧 product slug、双 fingerprint、
+命令 alias 或环境变量 fallback 扩大输入范围。未来版本转换仍需在本仓库独立完成 adapter、fixture、CLI 和发行验证。
 
 ## 7.4 如何证明“确实没有”
 

@@ -55,10 +55,9 @@ SQLite-only manifest 的线格式来自 Foundation `sarmg-contracts =0.6.0`，�
 | Foundation `BackupManifest` 的本仓包装 | Host/Sunshine SQLite-only | `database.sqlite3` + `manifest.json` | `verify-sqlite` |
 | `CurrentBackupManifest` version 3 | Media composite | exact `database.sqlite3` + `tree/` + `manifest.json` | `verify-media-backup` |
 
-`inspect-manifest` 只调用第一种 parser。当前该命令直接读取给定文件，没有独立的 1 MiB 文件大小保护；
-1 MiB 上限在 SQLite backup 目录的完整 verify 路径执行。因此不要对任意不可信超大文件使用
-`inspect-manifest`，也不要把 parse 成功写成“备份已验证”。Media manifest 最大 128 MiB，必须通过 Media
-专用入口解析和复核。Media 只读 v3，不为 v2 保留 alias/fallback；v3 把 tree root mode 纳入 inventory。
+`inspect-manifest` 只调用第一种 parser，仅读取普通文件，拒绝末级符号链接和超过 1 MiB 的清单。
+读取前检查文件大小，实际读取也有相同上限，以覆盖文件并发增长。parse 成功不表示备份资源已验证。
+Media manifest 最大 128 MiB，使用 Media 专用入口解析和复核；其唯一版本为 3，tree root mode 属于 inventory。
 
 ## 4.4 Manifest 不是信任根
 
@@ -159,7 +158,7 @@ entry。失败后输入仍是调查证据。若运维希望重新生成备份，
 tree budgets 是本次授权并写入合同，不使用“无限”值绕过。
 
 当前显式解析上限包括 SQLite manifest 1 MiB、credentials key file 4096 bytes、Media manifest 128 MiB、
-Media tree 2,000,000 entries/深度 128。上限不是容量规划：一个合法的巨大普通文件仍需要对应磁盘空间、
+Media journal 272 MiB、Media tree 2,000,000 entries/深度 128。上限不是容量规划：一个合法的巨大普通文件仍需要对应磁盘空间、
 读取时间和 Hash 时间。生产变更还要按源逻辑/物理大小估算 pending、restore incoming、preserved original
 和备份传输副本。
 

@@ -118,20 +118,19 @@ SQLite restore 当前不对外声明 recover；若出现无法自动清理的 re
 命令绕过密文认证。
 
 Media recovery 不从 journal 自动选择上下文：CLI 必须重新提供 exact `--expect-version 0.2.0`、source
-`--input`、目标 `--database/--data-dir`、`--recovery` 和 `--action commit|rollback`。工具比对 v2 journal 后，对目标 DB/tree 两个
+`--input`、目标 `--database/--data-dir`、`--recovery` 和 `--action commit|rollback`。工具比对 v3 journal 后，对目标 DB/tree 两个
 sibling lock 取得 non-blocking exclusive 锁，再验证 source manifest、路径 identity、incoming/original
 inventory 与 phase。source backup 绑定规范绝对路径和目录 dev/inode，不能在中断后移动、替换或拿内容相同
 的副本顶替。CLI 不暴露可伪造的 product/runtime 参数：命令内部把 product 固定为 `media-backup`，当前
 runtime directory 固定为 absent，并把这两个 current 上下文交给 `CurrentRecoveryOptions`。journal 绑定 tool
 version 而不是 binary SHA，制品摘要仍由运维变更单证明。
 
-## 6. 为什么当前没有升级流程
+## 6. 当前状态操作与升级边界
 
-开发期数据格式不是长期合同。试验性历史 SQL/adapter 会迫使产品和工具维护尚未承诺的旧语义，因此已
-删除。当前流程树不存在 `upgrade-sqlite`、`upgrade-sentinel`、`upgrade-dufs`、source-backup 或
-upgrade-recovery 分支。旧开发数据应重新部署；当前没有已支持 edge 时，`sarmg-upgrade` 也不得用 current
-restore 或临时脚本冒充迁移。未来稳定版本的精确 edge 只能在本仓库以独立审核的 adapter、fixture、CLI
-与 release 原子加入，绝不并回产品运行时，也不为模糊旧输入增加 alias 或 fallback。
+当前流程树只提供支持矩阵中明确列出的备份、校验和恢复，不注册 `upgrade-sqlite`、`upgrade-sentinel`、
+`upgrade-dufs`、source-backup 或 upgrade-recovery 分支。未支持格式必须保留源数据并停止操作；
+current restore 不能转换版本。版本转换适配器属于本仓库，必须独立完成实现、fixture、CLI 和发行验收，
+产品运行时只接受自身当前格式。
 
 未来首个 edge 的准入流程为：稳定 source/target 身份 -> 独立 fixture 和恶意负例 -> immutable source
 backup -> 从零构建 target -> external key -> 停机锁 -> durable journal -> 全故障点 commit/rollback ->
@@ -163,7 +162,7 @@ clean checkout + annotated exact tag
 |---|---|---|---|---|
 | `support [--json]` | 无产品输入 | `support_matrix()` | 此 binary 编译进的 current capability 与正式 target | catalog 中的资源描述自动等于可执行能力 |
 | `catalog [--json]` | 无产品输入 | `Product::contract()` | 六个产品的持久资源边界 | 某资源已有 backup/restore adapter |
-| `inspect-manifest PATH` | Foundation SQLite manifest | `BackupManifest::read` | JSON、共享字段、产品策略、相对路径、排序可解析 | Media manifest、资源字节、hash、Schema、key；此入口当前不单独限制读取字节数 |
+| `inspect-manifest PATH` | Foundation SQLite manifest | `BackupManifest::read` | JSON、共享字段、产品策略、相对路径、排序可解析 | Media manifest、资源字节、hash、Schema、key；该入口最多读取 1 MiB 清单，拒绝特殊文件及末级符号链接 |
 | `backup-media` | Media 0.2.0 | `backup_current` | DB+tree 同一 current generation 已不可变发布并复验 | 任意其他 Media 版本或历史转换 |
 | `verify-media-backup` | Media current composite backup | `verify_current_backup` | DB identity、tree inventory、manifest 全部相符 | 源生产路径此刻仍与备份相同 |
 | `restore-media` | 全新目标或显式 replace | `restore_current` | current DB+tree 已成组安装并验证 | 服务已停止、业务 smoke 已通过 |
@@ -234,7 +233,7 @@ tree 根 mode、非根目录相对 path/mode、普通文件 path/mode/size/SHA-2
 
 ## 11. Media restore 与 recovery phase
 
-Media journal 的唯一 current version 是 2，最大 1 MiB；不读取 v1，也不补默认字段。字段逐项绑定：
+Media journal 的唯一 current version 是 3，最大 272 MiB；缺失字段会被拒绝。字段逐项绑定：
 
 - `tool_version`、`product`、`application_version`、`adapter_id`、完整 `schema_identity` 与
   `created_at_epoch_seconds`；
@@ -257,7 +256,7 @@ source/targets/version，再取得 database sibling 与 tree sibling 两把 non-
 SHA-256/mode/Schema 及 tree inventory/per-file SHA-256/BLAKE3/SQLite 对应关系。锁内发现 pending journal
 update 时，把它视为尚未提交的更新并丢弃，不能拿它覆盖已提交 journal 状态。
 
-recovery 目录顶层也执行 exact 校验：只允许单硬链接、最大 1 MiB 的 `restore-journal.json`，以及同样受限的
+recovery 目录顶层也执行 exact 校验：只允许单硬链接、最大 272 MiB 的 `restore-journal.json`，以及同样受限的
 optional `restore-journal.pending`；额外条目、链接、特殊文件或缺少 committed journal 一律拒绝。
 
 | Phase/事实 | 磁盘状态 | 此时中断后的原则 |

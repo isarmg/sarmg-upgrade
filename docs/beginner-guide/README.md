@@ -9,7 +9,7 @@
 4. [能力目录、Manifest 与备份流程](04-capabilities-manifests-and-backup.md)
 5. [恢复、Journal 与中断处置](05-restore-journal-and-crash-recovery.md)
 6. [产品 Adapter 与组合状态](06-product-adapters-and-composite-state.md)
-7. [为什么当前没有历史升级 Edge](07-historical-edges-and-current-contracts.md)
+7. [当前支持矩阵与升级 Edge 边界](07-historical-edges-and-current-contracts.md)
 8. [测试、调试与新增 Adapter](08-testing-debugging-and-new-adapters.md)
 9. [正式发行、安全与生产运维](09-release-security-and-operations.md)
 10. [源码路线、演练与术语表](10-reading-roadmap-and-glossary.md)

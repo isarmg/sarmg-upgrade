@@ -1,6 +1,6 @@
 # Sarmg Upgrade 完整功能与取舍清单
 
-本文描述 `sarmg-upgrade 0.3.0` 当前二进制实际提供的能力。项目仍在开发阶段，尚未形成可承诺的历史产品格式，因此当前支持矩阵中的 `upgrade_edges` 全部为空；仓库已删除 Host、Sunshine、Sentinel 和 Dufs 的试验性历史升级 SQL、适配器、source-backup 和 upgrade-recovery 命令。保留的是可复用的当前状态备份、严格校验、恢复、恢复日志和发布基础设施。
+本文描述 `sarmg-upgrade 0.3.0` 当前二进制实际提供的能力：明确版本的备份、严格校验、恢复、恢复日志和发布验证。支持矩阵中的 `upgrade_edges` 全部为空；工具不提供跨版本数据转换。
 
 正式工具唯一支持 Linux AMD64 GNU `x86_64-unknown-linux-gnu`。它是停机离线 CLI，不是 Server，也没有
 React/Vite 或其他前端；仓库当前无需运行时配置或服务部署，故不创建空 `config/`、`deploy/`、`clients/`。
@@ -26,7 +26,7 @@ React/Vite 或其他前端；仓库当前无需运行时配置或服务部署，
 |---|---|---|---|---|---|---|
 | UPG-001 | `support` 机器可读支持矩阵 | `src/support.rs`、CLI、release | 核心 | 中 | 调用方无法区分“实现、未实现、计划中”；容易误调用不存在能力 | JSON 稳定性、每产品唯一、edge 全空 |
 | UPG-002 | `catalog` 持久资源目录 | `src/catalog.rs`、Product/ResourceKind | 建议保留 | 低 | 运维和未来适配器缺少统一资源边界 | 六项目枚举、JSON/text 输出 |
-| UPG-003 | `inspect-manifest` 严格只读解析 Foundation SQLite manifest | `src/main.rs`、`src/manifest.rs` | 建议保留 | 低 | 排障必须进入具体 verify/restore 才能发现 JSON 合同问题 | unknown field、坏相对路径、重复/乱序资源；不读资源、不验 hash/key/schema 字节，也不解析 Media composite manifest；当前 CLI 此入口没有独立文件大小上限 |
+| UPG-003 | `inspect-manifest` 严格只读解析 Foundation SQLite manifest | `src/main.rs`、`src/manifest.rs` | 建议保留 | 低 | 排障必须进入具体 verify/restore 才能发现 JSON 合同问题 | unknown field、坏相对路径、重复/乱序资源；不读资源、不验 hash/key/schema 字节，也不解析 Media composite manifest；清单大小上限为 1 MiB，仅读取普通文件且拒绝末级符号链接 |
 | UPG-004 | Media Backup 当前组合备份 | `src/current.rs`、SQLite online backup、tree copy | 核心 | 高 | Media 数据库与媒体树无法作为同一代保存 | DB/tree 交叉核对、并发源变化 |
 | UPG-005 | Media v3 当前备份全树 inventory | tree root mode、非根目录 path/mode、文件 path/mode/size/SHA、tree digest | 保障 | 高 | 缺失、多余、mode 漂移或被篡改媒体无法在恢复前发现 | root/non-root mode、文件/目录/special/link/预算；不承诺 xattr/ACL/sparse/hardlink |
 | UPG-006 | Media 当前备份严格 Schema identity | product metadata、schema fingerprint | 保障 | 高 | 错版本或手改数据库可能进入备份 | version/revision/SHA/DDL 负例 |
@@ -89,7 +89,7 @@ React/Vite 或其他前端；仓库当前无需运行时配置或服务部署，
 | UPG-063 | Media verify 对 backup 根 exact 三项并全量复核 DB、tree、空 configuration/external requirements 与业务状态 | `src/current.rs::verify_current_backup` | 核心 | 高 | 只验 manifest 或忽略顶层 extra 会把未纳入 generation 的资源当可恢复 | 根目录只允许 database.sqlite3/tree/manifest.json；extra/missing/type/tamper/root 与 entry mode/hash/schema/tree relation；configuration/external requirements 必须空；只读输入，无 repair |
 | UPG-064 | Media restore 要求目标 DB/tree 同代：均不存在或均存在且显式 replace | `src/current.rs::restore_current` | 核心 | 高 | 可产生 database/tree 混合代 | mixed existence 拒绝；existing 必须 exact current；Media configuration 参数必须空；空目标演练 |
 | UPG-065 | Media restore 只为 DB/tree 建相邻 incoming 与 original | `src/current.rs::restore_current`、`RestoreJournal` | 保障 | 高 | 跨文件系统安装不原子；原件无法成组回滚 | sibling 路径、same filesystem rename、DB/tree 同代切换、无 copy fallback；journal 的通用 configuration vector 在当前 Media 合同中必须为空 |
-| UPG-066 | Media current journal v2 绑定 source/target/generation 并持久化六个 phase | `src/current.rs::{RestoreJournal,RestorePhase,CURRENT_RESTORE_JOURNAL_VERSION}` | 保障 | 高 | 中断后无法证明哪一代在哪个名字；旧 journal 双读会重新引入历史合同 | tool/product/version/adapter/Schema/time；source backup canonical path+dev/inode、manifest version/time/bytes/hash、source tree identity；target+parent identity；同 nonce stage/original；incoming/optional original DB/tree 完整 inventory；configuration/external requirements 均 `[]`；六 phase；unknown/缺字段、非 v2、非法 phase 拒绝；最大 1 MiB、目录 fsync |
+| UPG-066 | Media current journal v3 绑定 source/target/generation 并持久化六个 phase | `src/current.rs::{RestoreJournal,RestorePhase,CURRENT_RESTORE_JOURNAL_VERSION}` | 保障 | 高 | 中断后无法证明哪一代在哪个名字；旧 journal 双读会重新引入历史合同 | tool/product/version/adapter/Schema/time；source backup canonical path+dev/inode、manifest version/time/bytes/hash、source tree identity；target+parent identity；同 nonce stage/original；incoming/optional original DB/tree 完整 inventory；configuration/external requirements 均 `[]`；六 phase；unknown/缺字段、非 v3、非法 phase 拒绝；最大 272 MiB、目录 fsync |
 | UPG-067 | `recover-media-restore` 要求显式 current version、source backup、DB/tree target、recovery 与 commit/rollback | `src/main.rs::Command::RecoverMediaRestore`、`src/current.rs::recover_current` | 保障 | 高 | 从不可信 journal 自动猜 source/target/action 或无锁续接可能修改错误 generation | 六项 `--expect-version/--input/--database/--data-dir/--recovery/--action` 必填并与 journal 精确一致；canonical/disjoint 路径与 recovery simple UUID 名；DB/tree 两把 non-blocking exclusive lock；pending journal 丢弃；commit 全量 verify；rollback 方向不可逆且恢复 original 或移除无原代 incoming；重复同 action 幂等 |
 | UPG-068 | SQLite-only 只允许 Host 或 Sunshine | `src/sqlite.rs::require_sqlite_only_product` | 核心 | 中 | Media/Sentinel/Dufs 组合资源会被 generic SQLite 假装完整备份 | 三组合产品负例；support/capability 不出现；不能手工改 product slug |
 | UPG-069 | SQLite backup 目录必须恰好有 database.sqlite3 与 manifest.json | `src/sqlite.rs::verify_sqlite_backup_internal` | 保障 | 中 | extra 文件可能隐藏 sidecar/恶意状态或造成歧义 | exact entry vector；extra/missing/type/symlink 拒绝；manifest 最大 1 MiB |
@@ -148,11 +148,11 @@ Foundation。
 
 机器调用必须以 `sarmg-upgrade support --json` 为准。表格不能让未实现命令变成支持能力。
 
-## 4. 删除历史升级代码的取舍
+## 4. 当前状态与版本转换边界
 
-开发期产品格式还会变化。保留具体 `0.x -> 0.y` 适配器会产生四种错误成本：把试验数据结构误当长期合同；迫使当前产品继续保留旧语义；让安全验证同时覆盖多代密文和 Schema；让文档与发布矩阵宣称未经现实迁移验证的能力。因此当前删除了历史 SQL、旧格式 parser、source manifest、产品升级 journal 和相关 CLI。
+每个适配器只接受代码允许的精确产品版本与状态身份。当前没有历史升级 SQL、旧格式 parser、source manifest、产品升级 journal 或升级 CLI；`current restore` 不能转换版本。
 
-未来首个历史升级适配器必须在独立提交中重新加入，并至少具备：精确 source/target 身份、拒绝自动版本猜测、先发布不可变 source backup、从零构建 target、外部 key 实际认证、停机锁、容量预算、durable journal、所有持久边界故障注入、commit/rollback、support/catalog/release 元数据和中文演练文档。
+新增历史升级适配器须同时具备精确 source/target 身份、不可变 source backup、独立 target 构建、外部 key 实际认证、停机锁、容量预算、durable journal、持久边界故障注入、commit/rollback、支持矩阵、发行元数据和演练文档。
 
 ## 5. 通用恢复状态机
 

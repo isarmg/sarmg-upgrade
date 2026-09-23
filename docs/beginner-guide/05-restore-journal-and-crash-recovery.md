@@ -27,8 +27,8 @@ stage 不是可供产品启动的半成品位置。操作者不得把服务配�
 journal 记录工具/产品/版本/adapter/Schema identity/时间、source backup 的规范路径与 inode/path identity、
 manifest version/time/bytes/SHA、source tree identity、database/tree 目标与父路径 identity、由同 nonce 推导的
 original/incoming sibling 名称、incoming 与 optional original 的 DB/tree 完整内容 inventory、阶段和预期 Hash。
-它先于第一次目标 mutation 持久化，并在每阶段更新后同步目录。Media current journal 最大 1 MiB、唯一版本
-为 2；不读取旧 v1 journal，也不给缺失字段补默认值。`configuration` 和 `external_requirements` 必须精确为 `[]`。
+它先于第一次目标 mutation 持久化，并在每阶段更新后同步目录。Media current journal 最大 272 MiB、唯一版本
+为 3；缺失字段会被拒绝。`configuration` 和 `external_requirements` 必须精确为 `[]`。
 
 journal 的安全意义有三层：
 
@@ -45,7 +45,7 @@ nonce 精确推导。recover 比对六项 CLI 输入后，取得 database/tree �
 再验证全部 source/manifest/stage/target/original 证据。锁内 pending journal 属于未提交更新，会被丢弃；
 已持久化 `rollback-started` 后不能改选 commit。重复相同 action 可幂等推进，但每次 cleanup 前仍会重验证证据。
 
-Media v2 journal 精确绑定 Cargo tool version，但不内嵌 release binary SHA。工具会拒绝不同 tool version；
+Media v3 journal 精确绑定 Cargo tool version，但不内嵌 release binary SHA。工具会拒绝不同 tool version；
 同版本制品是否真是同一受信 bytes，仍必须由操作者用变更单、签名和 binary SHA 证明，不能从 journal 推断。
 
 ## 5.4 安装阶段
@@ -58,7 +58,7 @@ prepared -> original preserved -> incoming installed -> installed verified -> co
 “目标存在”推断完成。
 
 SQLite restore journal version 1 的 phase 名是 `phase-prepared`、`phase-originals-preserved`、
-`phase-installed`、`phase-verified`；Media composite journal 的唯一 current version 2 使用 `prepared`、
+`phase-installed`、`phase-verified`；Media composite journal 的唯一 current version 3 使用 `prepared`、
 `originals-preserved`、`installed`、`verified`，并在回退中持久化 `rollback-started`、
 `rollback-verified`。两种 journal 不是通用互换格式，recover 命令也不能交叉；Media v1 不保留兼容 reader。
 

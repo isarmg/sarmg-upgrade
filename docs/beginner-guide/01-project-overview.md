@@ -111,7 +111,7 @@ edge；不把 raw key 写备份；不删除 recovery 证据；不为产品 runti
 ## 1.9 主要取舍
 
 停机换取明确状态边界；全量 immutable backup 换取更多空间；显式 recovery action 换取避免误判；
-external key 分离换取独立 Secret 运维；开发期删除历史 edge 换取更小的兼容负担。
+external key 分离换取独立 Secret 运维；当前仅实现明确版本的备份、验证与恢复。
 
 | 取舍 | 得到什么 | 付出什么 |
 |---|---|---|

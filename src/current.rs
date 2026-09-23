@@ -32,8 +32,8 @@ const CURRENT_RESTORE_JOURNAL_VERSION: u32 = 3;
 const MAX_MANIFEST_BYTES: u64 = 128 * 1024 * 1024;
 // A journal contains the accepted source manifest tree and, when replacing an
 // existing installation, one equally bounded original-tree inventory. Keep a
-// finite envelope for hostile/corrupt input, but size it from those contracts
-// instead of using the old unrelated 1 MiB limit. Every write is serialized and
+// finite envelope for hostile/corrupt input, sized from those contracts.
+// Every write is serialized and
 // checked against this same limit before the journal path is created or any
 // target replacement begins.
 const MAX_CURRENT_JOURNAL_BYTES: u64 = MAX_MANIFEST_BYTES * 2 + 16 * 1024 * 1024;

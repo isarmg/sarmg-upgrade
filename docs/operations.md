@@ -17,7 +17,7 @@ sarmg-upgrade catalog --json
 sarmg-upgrade inspect-manifest /backup/manifest.json
 ```
 
-`inspect-manifest` 只证明 JSON 可按当前格式解析，不读取资源字节、SQLite 或 external key，不能替代
+`inspect-manifest` 仅读取不超过 1 MiB 的普通文件，拒绝末级符号链接；成功只证明 JSON 可按当前格式解析，不读取资源字节、SQLite 或 external key，不能替代
 `verify-*`。`catalog` 也不等于已实现支持。
 
 ## 3. Media Backup 当前组合备份
@@ -279,8 +279,8 @@ Media 的 DB/tree 必须同时不存在或同时存在；混合代在 mutation �
 
 ## 16. Recovery 决策矩阵
 
-Media 只接受 current journal v2，不兼容 v1。读写共用 272 MiB 硬上限，可覆盖两个已验收最大树 inventory
-与固定元数据；完整序列化结果会在创建 journal 或替换任何目标前检查，超限时目标保持不变。v2 把 tool/product/version/adapter/Schema/time、
+Media 只接受 current journal v3。读写共用 272 MiB 硬上限，可覆盖两个已验收最大树 inventory
+与固定元数据；完整序列化结果会在创建 journal 或替换任何目标前检查，超限时目标保持不变。journal 绑定 tool/product/version/adapter/Schema/time、
 source backup 规范路径+inode/path identity、manifest version/time/bytes/SHA、source tree identity、database/tree
 目标及父路径 identity、同 nonce 精确推导的 stage/original、incoming/optional original 的 DB/tree 完整 inventory、
 空 configuration/external requirements 和 phase 绑定起来。`recover-media-restore` 仍要求操作者显式重给
