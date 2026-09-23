@@ -142,7 +142,7 @@ key 文件内容为 Base64 编码的精确 32 bytes；文件必须为单硬链�
 
 ## 9. 正式发行
 
-annotated `v0.3.0` 触发构建和发布两阶段：完整 Rust 门禁，暂存 source-bound binary、support/catalog、
+annotated `v0.3.1` 触发构建和发布两阶段：完整 Rust 门禁，暂存 source-bound binary、support/catalog、
 CycloneDX SBOM、环境和 provenance；发布 job 不 checkout source，签名 `SHA256SUMS`，解包复验后发布固定
 `.tar.zst` 和 outer digest。已有 tag/release/asset 不覆盖。发布验收必须确认 binary 输出没有历史 edge。
 
