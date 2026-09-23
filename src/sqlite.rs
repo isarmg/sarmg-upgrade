@@ -34,7 +34,7 @@ use uuid::Uuid;
 
 use crate::{
     BackupManifest, ExternalRequirement, Product, ResourceEntry, ResourceKind, SchemaIdentity,
-    manifest::MANIFEST_VERSION,
+    manifest::{MANIFEST_VERSION, MAX_MANIFEST_BYTES},
 };
 
 mod restore;
@@ -45,7 +45,6 @@ pub use restore::{
 
 const DATABASE_FILE: &str = "database.sqlite3";
 const MANIFEST_FILE: &str = "manifest.json";
-const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 const MAX_CREDENTIAL_KEY_BYTES: u64 = 4096;
 pub(crate) const HOST_CURRENT_APPLICATION_VERSION: &str = "0.8.0";
 pub(super) const HOST_CURRENT_SCHEMA_REVISION: u64 = 1;

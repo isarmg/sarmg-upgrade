@@ -1,6 +1,7 @@
 use std::{
     collections::BTreeSet,
-    fs,
+    fs::File,
+    io::Read,
     ops::{Deref, DerefMut},
     path::{Component, Path, PathBuf},
 };
@@ -18,6 +19,7 @@ pub use sarmg_contracts::{
 };
 
 pub const MANIFEST_VERSION: u8 = BACKUP_MANIFEST_VERSION;
+pub const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 
 /// Foundation 定义线上的通用备份清单；本包装只叠加本工具拥有的产品策略。
 ///
@@ -71,14 +73,40 @@ impl BackupManifest {
     }
 
     pub fn read(path: &Path) -> Result<Self, ManifestError> {
-        let bytes = fs::read(path).map_err(|source| ManifestError::Read {
+        let read_error = |source| ManifestError::Read {
             path: path.to_path_buf(),
             source,
-        })?;
+        };
+        let file = File::from(
+            rustix::fs::open(
+                path,
+                rustix::fs::OFlags::RDONLY
+                    | rustix::fs::OFlags::CLOEXEC
+                    | rustix::fs::OFlags::NONBLOCK
+                    | rustix::fs::OFlags::NOFOLLOW,
+                rustix::fs::Mode::empty(),
+            )
+            .map_err(|error| read_error(error.into()))?,
+        );
+        let metadata = file.metadata().map_err(read_error)?;
+        if !metadata.is_file() {
+            return Err(ManifestError::NotRegularFile);
+        }
+        if metadata.len() > MAX_MANIFEST_BYTES {
+            return Err(ManifestError::TooLarge);
+        }
+        // Bound the read as well as metadata: the file may grow after fstat.
+        let mut bytes = Vec::new();
+        file.take(MAX_MANIFEST_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(read_error)?;
         Self::from_slice(&bytes)
     }
 
     pub fn from_slice(bytes: &[u8]) -> Result<Self, ManifestError> {
+        if bytes.len() as u64 > MAX_MANIFEST_BYTES {
+            return Err(ManifestError::TooLarge);
+        }
         // 先走 Foundation 的严格 parser；本类型的 Deserialize 随后叠加产品校验。
         Ok(serde_json::from_slice(bytes)?)
     }
@@ -166,6 +194,10 @@ fn validate_relative_path(path: &Path) -> Result<(), ManifestError> {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ManifestError {
+    #[error("manifest must be a regular file")]
+    NotRegularFile,
+    #[error("manifest exceeds the 1 MiB size limit")]
+    TooLarge,
     #[error("failed to read manifest {path}: {source}")]
     Read {
         path: PathBuf,
@@ -207,6 +239,7 @@ pub enum ManifestError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     fn valid_manifest() -> BackupManifest {
         BackupManifest::new(ContractBackupManifest {
@@ -234,6 +267,54 @@ mod tests {
     #[test]
     fn accepts_canonical_manifest() {
         valid_manifest().validate().unwrap();
+    }
+
+    #[test]
+    fn manifest_read_and_parser_share_the_size_limit() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("manifest.json");
+        let mut bytes = serde_json::to_vec(&valid_manifest()).unwrap();
+        bytes.resize(MAX_MANIFEST_BYTES as usize, b' ');
+        fs::write(&path, &bytes).unwrap();
+        assert_eq!(BackupManifest::read(&path).unwrap(), valid_manifest());
+        bytes.push(b' ');
+        fs::write(&path, &bytes).unwrap();
+        assert!(matches!(
+            BackupManifest::read(&path),
+            Err(ManifestError::TooLarge)
+        ));
+        assert!(matches!(
+            BackupManifest::from_slice(&bytes),
+            Err(ManifestError::TooLarge)
+        ));
+    }
+
+    #[test]
+    fn manifest_read_rejects_links_directories_and_fifos_without_blocking() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("manifest.json");
+        fs::write(&path, serde_json::to_vec(&valid_manifest()).unwrap()).unwrap();
+        let link = directory.path().join("link.json");
+        std::os::unix::fs::symlink(&path, &link).unwrap();
+        assert!(matches!(
+            BackupManifest::read(&link),
+            Err(ManifestError::Read { .. })
+        ));
+        assert!(matches!(
+            BackupManifest::read(directory.path()),
+            Err(ManifestError::NotRegularFile)
+        ));
+        let fifo = directory.path().join("fifo.json");
+        rustix::fs::mkfifoat(
+            rustix::fs::CWD,
+            &fifo,
+            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+        )
+        .unwrap();
+        assert!(matches!(
+            BackupManifest::read(&fifo),
+            Err(ManifestError::NotRegularFile)
+        ));
     }
 
     #[test]
