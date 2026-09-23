@@ -51,6 +51,7 @@ Client 重注册/重部署策略。
 SQLite-only 物理资源还依赖 external credential key。verify/restore 必须提供精确 key ID/file，并实际认证
 所有 `devices.authorization_code_enc` 与 `_sarmg_operations.request_payload` 中的密文，并核对授权码和请求指纹；operation 状态不影响扫描。
 原始 key 不进包。
+数据库还必须包含当前 Foundation 平台元数据和可解析的 `manager_identity.manager_id`。
 
 当前 exact identity 是 `0.10.1` / revision 7 /
 `1acc8f2d9fac7ec4e973dd7e43cf5099e4a0b713b58a59e4969797602030d5d2`。manifest 中 external requirement 固定

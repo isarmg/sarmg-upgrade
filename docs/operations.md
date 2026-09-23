@@ -224,7 +224,8 @@ sarmg-upgrade catalog --json
 | Dufs RAM | `0.51.0` | 1 | `3659ff0c703515f555af95f0f1c08c35fa0555a8978f5f0e5a658fd93d225423` | DB/shared root/`dufs.yaml` 组合 backup/verify/restore/recover |
 
 这些值用于核对 binary/code/release，不是允许手写进数据库或 manifest 的“修复参数”。工具会从实际
-`sqlite_schema` 计算 fingerprint，并检查 `product_metadata` 五列/单行和 integrity/FK。任何额外对象都会
+`sqlite_schema` 计算 fingerprint，并检查 `product_metadata` 五列/单行和 integrity/FK。四个使用 Foundation 平台库的 Server
+还必须有当前 `server-control-plane` 平台元数据；Sunshine 还必须有可解析的 Manager ID。任何额外对象都会
 自然改变 fingerprint；没有 `_sqlx_migrations` 或其他旧表名特判。
 
 Dufs 的 `store_meta` 记录共享目录的设备号和 inode。备份要求它们等于源目录；恢复在暂存阶段把数据库重绑定到新目录，

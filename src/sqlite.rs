@@ -374,6 +374,14 @@ pub(super) fn verify_sunshine_encrypted_values(
     key: &[u8; 32],
 ) -> anyhow::Result<()> {
     let connection = open_read_only(database)?;
+    let manager_id: String = connection
+        .query_row(
+            "SELECT manager_id FROM manager_identity WHERE singleton=1",
+            [],
+            |row| row.get(0),
+        )
+        .context("Sunshine manager identity is missing")?;
+    Uuid::parse_str(&manager_id).context("Sunshine manager identity is not a UUID")?;
     ensure!(
         !key_id.is_empty()
             && key_id.len() <= 64
@@ -533,6 +541,21 @@ pub fn schema_fingerprint(database: &Path) -> anyhow::Result<String> {
 fn verify_current_database(database: &Path, product: Product) -> anyhow::Result<SchemaIdentity> {
     let identity = verify_schema_identity_database(database)?;
     crate::manifest::validate_schema_identity_for_product(&identity, product)?;
+    if product != Product::DufsRam {
+        let connection = open_read_only(database)?;
+        let (generation, revision, profile, created): (i64, i64, String, i64) = connection
+            .query_row(
+                "SELECT platform_generation, platform_schema_revision, profile, created_at_micros \
+                 FROM _sarmg_platform_metadata WHERE singleton=1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .context("Foundation platform metadata is missing")?;
+        ensure!(
+            generation == 1 && revision == 1 && profile == "server-control-plane" && created >= 0,
+            "Foundation platform metadata is not current"
+        );
+    }
     Ok(identity)
 }
 
@@ -1099,6 +1122,20 @@ mod tests {
                 ),
             )
             .unwrap();
+        connection
+            .execute(
+                "INSERT INTO _sarmg_platform_metadata VALUES(1,1,1,'server-control-plane',1)",
+                [],
+            )
+            .unwrap();
+        if product == Product::SunshineManager {
+            connection
+                .execute(
+                    "INSERT INTO manager_identity VALUES(1,'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')",
+                    [],
+                )
+                .unwrap();
+        }
     }
 
     pub(super) fn insert_test_record(path: &Path, product: Product, value: &str) {
@@ -1301,6 +1338,24 @@ mod tests {
             }),
             "an output that exists before staging must not leave a pending directory",
         );
+    }
+
+    #[test]
+    fn current_host_backup_requires_foundation_platform_metadata() {
+        let root = tempfile::tempdir().unwrap();
+        let database = root.path().join("host.sqlite3");
+        create_current_database(
+            &database,
+            Product::HostMonitoring,
+            HOST_CURRENT_APPLICATION_VERSION,
+        );
+        Connection::open(&database)
+            .unwrap()
+            .execute("DELETE FROM _sarmg_platform_metadata", [])
+            .unwrap();
+        let output = root.path().join("backup");
+        assert!(create_sqlite_backup(Product::HostMonitoring, &database, &output).is_err());
+        assert!(!output.exists());
     }
 
     #[test]

@@ -47,6 +47,18 @@ fn current_database(path: &Path, key: [u8; 32]) {
             ["1acc8f2d9fac7ec4e973dd7e43cf5099e4a0b713b58a59e4969797602030d5d2"],
         )
         .unwrap();
+    connection
+        .execute(
+            "INSERT INTO _sarmg_platform_metadata VALUES(1,1,1,'server-control-plane',1)",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO manager_identity VALUES(1,'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')",
+            [],
+        )
+        .unwrap();
     let id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     let code = "a1".repeat(18);
     let payload = sarmg_secret_envelope::seal::<ClientAuthorization>(
@@ -122,6 +134,27 @@ fn sunshine_current_backup_authenticates_the_actual_client_envelope() {
         &[7; 32],
     )
     .unwrap();
+    Connection::open(&database)
+        .unwrap()
+        .execute("DELETE FROM manager_identity", [])
+        .unwrap();
+    assert!(
+        create_sqlite_backup_with_credentials(
+            Product::SunshineManager,
+            &database,
+            &root.path().join("missing-manager"),
+            "primary",
+            &[7; 32],
+        )
+        .is_err()
+    );
+    Connection::open(&database)
+        .unwrap()
+        .execute(
+            "INSERT INTO manager_identity VALUES(1,'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')",
+            [],
+        )
+        .unwrap();
     Connection::open(&database).unwrap().execute(
         "UPDATE _sarmg_operations SET action='sunshine.restart' WHERE operation_id='operation-1'", [],
     ).unwrap();

@@ -26,6 +26,14 @@ fn database(
             (product, version, revision, fingerprint),
         )
         .unwrap();
+    if product != Product::DufsRam.slug() {
+        connection
+            .execute(
+                "INSERT INTO _sarmg_platform_metadata VALUES(1,1,1,'server-control-plane',1)",
+                [],
+            )
+            .unwrap();
+    }
 }
 
 fn named(root: &Path, values: &[(&str, &str)]) -> Vec<NamedFile> {
