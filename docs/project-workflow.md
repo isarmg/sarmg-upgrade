@@ -20,8 +20,8 @@ sarmg-upgrade 0.3.0
 ├─ 当前组合状态
 │  ├─ Sentinel Monitor 0.2.0：DB / recordings / 三个配置 / key
 │  └─ Dufs RAM 0.50.1：DB / shared root / dufs.yaml
-├─ Foundation 共享合同：两个 crate 均为 =0.6.0
-│  └─ immutable Git rev：1e889d08fa69fcf2b5fffe45e8cc42b68218f4f1
+├─ Foundation 共享合同：两个 crate 均为 =0.9.1
+│  └─ immutable Git rev：84966364c5b4662104e05741b3045482e4fd4fc8
 │  ├─ sarmg-contracts：manifest / resource / external requirement / SchemaIdentity
 │  └─ sarmg-schema-identity：metadata row/column / canonical query / fingerprint
 ├─ 暂未实现
@@ -60,7 +60,7 @@ sarmg-upgrade 产品命令
 
 边界是刻意的：Foundation 不链接 rusqlite、不打开产品路径、不声明 Host/Media/Sunshine 的支持版本；本仓库
 不复制 schema framing、metadata 五列模型、manifest leaf type 或旧 wire parser。开发、CI 与正式发行均只允许
-同时具有 `=0.6.0` 和不可变 Git rev `1e889d08fa69fcf2b5fffe45e8cc42b68218f4f1` 的 Foundation 依赖，
+同时具有 `=0.9.1` 和不可变 Git rev `84966364c5b4662104e05741b3045482e4fd4fc8` 的 Foundation 依赖，
 并把来源与 lockfile 纳入审核；不得用 workspace sibling、Cargo path dependency、可变 branch 或本地副本联调。
 
 ## 3. 当前备份流程

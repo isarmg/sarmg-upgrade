@@ -3,8 +3,8 @@ product_id = "sarmg-upgrade"
 
 [foundation]
 platform_generation = 1
-version = "0.6.0"
-git_rev = "1e889d08fa69fcf2b5fffe45e8cc42b68218f4f1"
+version = "0.9.1"
+git_rev = "84966364c5b4662104e05741b3045482e4fd4fc8"
 
 [[components]]
 id = "cli"

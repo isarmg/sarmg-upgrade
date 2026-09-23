@@ -687,12 +687,13 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "sarmg-admin-auth"
-version = "0.6.0"
-source = "git+https://github.com/isarmg/sarmg-foundation-server.git?rev=1e889d08fa69fcf2b5fffe45e8cc42b68218f4f1#1e889d08fa69fcf2b5fffe45e8cc42b68218f4f1"
+version = "0.9.1"
+source = "git+https://github.com/isarmg/sarmg-foundation-server.git?rev=84966364c5b4662104e05741b3045482e4fd4fc8#84966364c5b4662104e05741b3045482e4fd4fc8"
 dependencies = [
  "argon2",
  "base64",
  "getrandom 0.4.3",
+ "hmac",
  "sha2",
  "subtle",
  "thiserror",
@@ -700,8 +701,8 @@ dependencies = [
 
 [[package]]
 name = "sarmg-contracts"
-version = "0.6.0"
-source = "git+https://github.com/isarmg/sarmg-foundation-server.git?rev=1e889d08fa69fcf2b5fffe45e8cc42b68218f4f1#1e889d08fa69fcf2b5fffe45e8cc42b68218f4f1"
+version = "0.9.1"
+source = "git+https://github.com/isarmg/sarmg-foundation-server.git?rev=84966364c5b4662104e05741b3045482e4fd4fc8#84966364c5b4662104e05741b3045482e4fd4fc8"
 dependencies = [
  "sarmg-admin-auth",
  "sarmg-error",
@@ -713,8 +714,8 @@ dependencies = [
 
 [[package]]
 name = "sarmg-error"
-version = "0.6.0"
-source = "git+https://github.com/isarmg/sarmg-foundation-server.git?rev=1e889d08fa69fcf2b5fffe45e8cc42b68218f4f1#1e889d08fa69fcf2b5fffe45e8cc42b68218f4f1"
+version = "0.9.1"
+source = "git+https://github.com/isarmg/sarmg-foundation-server.git?rev=84966364c5b4662104e05741b3045482e4fd4fc8#84966364c5b4662104e05741b3045482e4fd4fc8"
 dependencies = [
  "serde",
  "serde_json",
@@ -723,8 +724,8 @@ dependencies = [
 
 [[package]]
 name = "sarmg-schema-identity"
-version = "0.6.0"
-source = "git+https://github.com/isarmg/sarmg-foundation-server.git?rev=1e889d08fa69fcf2b5fffe45e8cc42b68218f4f1#1e889d08fa69fcf2b5fffe45e8cc42b68218f4f1"
+version = "0.9.1"
+source = "git+https://github.com/isarmg/sarmg-foundation-server.git?rev=84966364c5b4662104e05741b3045482e4fd4fc8#84966364c5b4662104e05741b3045482e4fd4fc8"
 dependencies = [
  "serde",
  "sha2",

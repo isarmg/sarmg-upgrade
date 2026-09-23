@@ -155,8 +155,8 @@ Secret；不得同时接受新旧两把 key，也不得从下载归档本身建�
 
 Foundation 依赖是发布输入而不是运行时服务。发行前另行核对：
 
-1. `sarmg-contracts` 与 `sarmg-schema-identity` 均精确为 `=0.6.0`，Git rev 精确为
-   `1e889d08fa69fcf2b5fffe45e8cc42b68218f4f1`；
+1. `sarmg-contracts` 与 `sarmg-schema-identity` 均精确为 `=0.9.1`，Git rev 精确为
+   `84966364c5b4662104e05741b3045482e4fd4fc8`；
 2. `Cargo.lock` 中没有第二版本，也没有 registry/path fallback 或可漂移 branch；
 3. `cargo test --locked --all-targets --all-features` 覆盖 shared manifest parser、metadata column/row adapter、
    schema fingerprint 和本仓库产品级负例；

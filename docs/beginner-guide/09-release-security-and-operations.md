@@ -15,8 +15,8 @@ snapshot、SBOM、构建环境和 provenance 绑定在一起；finalize/publish 
 finalize 从 GitHub Secret 私钥派生公钥并逐字节比较，只有完全相等才可签名。因此 Secret 配错会中止发行，
 不会悄悄生成另一套“看似有效”的自签名资产。密钥轮换必须删除旧信任，只发布一个新的明确合同。
 
-Foundation 两个 crate 均精确固定为 `=0.6.0`，Git rev 固定为
-`1e889d08fa69fcf2b5fffe45e8cc42b68218f4f1`，它们是不可变供应链输入。不得为了构建成功放宽 semver、
+Foundation 两个 crate 均精确固定为 `=0.9.1`，Git rev 固定为
+`84966364c5b4662104e05741b3045482e4fd4fc8`，它们是不可变供应链输入。不得为了构建成功放宽 semver、
 切到 branch HEAD、workspace sibling、Cargo path dependency、复制旧源码或启用本地 fallback；否则同一
 Upgrade 版本可能产生不同线协议。
 

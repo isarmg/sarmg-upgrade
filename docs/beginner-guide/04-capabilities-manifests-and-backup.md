@@ -35,8 +35,8 @@ root；所以 generic SQLite 命令必须拒绝 Dufs，而不是因为资源列�
 manifest 把 backup 身份、工具版本、产品/版本、资源、文件 mode/size/Hash、tree aggregate、预算和非秘密
 external requirement 固化。它不包含 raw key，也不单凭自报内容获得信任。
 
-SQLite-only manifest 的线格式来自 Foundation `sarmg-contracts =0.6.0`，其不可变 Git rev 为
-`1e889d08fa69fcf2b5fffe45e8cc42b68218f4f1`。本工具不是把共享 JSON
+SQLite-only manifest 的线格式来自 Foundation `sarmg-contracts =0.9.1`，其不可变 Git rev 为
+`84966364c5b4662104e05741b3045482e4fd4fc8`。本工具不是把共享 JSON
 复制一遍，而是直接包装共享 `BackupManifest`，并直接复用 `BackupResource`、
 `BackupExternalRequirement`、`StateResourceKind` 与 `SchemaIdentity`。共享层保证字段名、unknown-field
 拒绝、identifier/SHA 和 JavaScript safe-integer 边界一致；本工具再验证以下产品事实：
