@@ -147,6 +147,7 @@ key 文件内容为 Base64 编码的精确 32 bytes；文件必须为单硬链�
 annotated `v0.3.3` 触发构建和发布两阶段：完整 Rust 门禁，暂存 source-bound binary、support/catalog、
 CycloneDX SBOM、环境和 provenance；发布 job 检出事件提交以读取发行说明，不构建或运行检出树中的源码；签名 `SHA256SUMS`，解包复验后发布固定
 `.tar.zst` 和 outer digest。已有 tag/release/asset 不覆盖。发布验收必须确认 binary 输出没有历史 edge。
+签名前会重新核对暂存 `release.json` 的版本、事件提交 SHA、binary SHA-256 和能力目录 SHA-256；任一不符即停止。
 
 Ed25519 信任锚固定在 `release/sarmg-upgrade-release-signing-public.pem`。其 DER 编码 SHA-256 必须为
 `a12719e9a174ce673ef58cdaa04d606135c57f401c50b95246d3c1bebef33d68`，stage 会把公钥和该指纹写入

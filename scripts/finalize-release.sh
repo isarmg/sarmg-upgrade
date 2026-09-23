@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 3 ]]; then
-  echo "usage: finalize-release.sh PACKAGE_DIRECTORY ED25519_PRIVATE_KEY OUTPUT_DIRECTORY" >&2
+if [[ $# -ne 5 ]]; then
+  echo "usage: finalize-release.sh PACKAGE_DIRECTORY ED25519_PRIVATE_KEY OUTPUT_DIRECTORY EXPECTED_REVISION EXPECTED_VERSION" >&2
   exit 64
 fi
 package=$1
 private_key=$2
 output=$3
+expected_revision=$4
+expected_version=$5
 
 release_metadata=$package/release.json
 if [[ ! -f $release_metadata ]]; then
@@ -19,17 +21,38 @@ if [[ ! -f $expected_public_key ]]; then
   echo "source-bound release signing public key is unavailable" >&2
   exit 1
 fi
-readarray -t release_identity < <(python3 - "$release_metadata" <<'PY'
-import json, pathlib, sys
+release_identity_text=$(python3 - "$release_metadata" "$expected_revision" "$expected_version" <<'PY'
+import hashlib, json, pathlib, sys
 
-value = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+metadata_path = pathlib.Path(sys.argv[1])
+value = json.loads(metadata_path.read_text(encoding="utf-8"))
 if value.get("product") != "sarmg-upgrade":
     raise SystemExit("release metadata names the wrong product")
 if value.get("target") != "x86_64-unknown-linux-gnu":
     raise SystemExit("release metadata does not name the sole supported release target")
 version = value.get("version")
-if not isinstance(version, str) or not version:
-    raise SystemExit("release metadata version is invalid")
+if version != sys.argv[3]:
+    raise SystemExit("release metadata version does not match the release tag")
+if value.get("source_revision") != sys.argv[2]:
+    raise SystemExit("release metadata source revision does not match the event commit")
+for field, relative_path in (
+    ("binary_sha256", "bin/sarmg-upgrade"),
+    ("catalog_sha256", "adapter-catalog.json"),
+):
+    expected = value.get(field)
+    if not isinstance(expected, str) or len(expected) != 64 or any(
+        character not in "0123456789abcdef" for character in expected
+    ):
+        raise SystemExit(f"release metadata {field} is invalid")
+    path = metadata_path.parent / relative_path
+    if path.is_symlink() or not path.is_file():
+        raise SystemExit(f"release package {relative_path} is not a regular file")
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    if digest.hexdigest() != expected:
+        raise SystemExit(f"release metadata {field} does not match {relative_path}")
 print(version)
 print(value["target"])
 fingerprint = value.get("release_signing_public_key_sha256")
@@ -40,6 +63,7 @@ if not isinstance(fingerprint, str) or len(fingerprint) != 64 or any(
 print(fingerprint)
 PY
 )
+readarray -t release_identity <<<"$release_identity_text"
 version=${release_identity[0]}
 target=${release_identity[1]}
 expected_public_key_sha=${release_identity[2]}

@@ -23,6 +23,9 @@ jobs:
       - name: Enforce workflow supply-chain policy
         run: ./scripts/check-workflow-supply-chain.py
 
+      - name: Test release identity checks
+        run: python3 tests/test_finalize_release.py
+
       - name: Install Rust 1.98.0
         run: rustup toolchain install 1.98.0 --profile minimal --component rustfmt,clippy
 

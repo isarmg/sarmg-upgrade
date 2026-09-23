@@ -42,6 +42,7 @@ jobs:
           cargo fmt --all -- --check
           cargo clippy --locked --all-targets --all-features -- -D warnings
           cargo test --locked --all-targets --all-features
+          python3 tests/test_finalize_release.py
       - name: Stage unsigned release input
         env:
           RUSTUP_TOOLCHAIN: 1.98.0
@@ -88,7 +89,8 @@ jobs:
           bash "$RUNNER_TEMP/release-input/release-tools/finalize-release.sh" \
             "$RUNNER_TEMP/release-input/package" \
             "$RUNNER_TEMP/release-signing-key.pem" \
-            "$RUNNER_TEMP/final-release"
+            "$RUNNER_TEMP/final-release" \
+            "$GITHUB_SHA" "${GITHUB_REF_NAME#v}"
       - name: Publish exact release assets
         env:
           GH_TOKEN: ${{ github.token }}
