@@ -327,9 +327,16 @@ pub fn credentials_key_from_file(path: &Path) -> anyhow::Result<[u8; 32]> {
             && named_before.len() <= MAX_CREDENTIAL_KEY_BYTES,
         "credentials key must be a private, single-link, bounded regular file"
     );
+    read_credentials_key_after_stat(path, &named_before)
+}
+
+fn read_credentials_key_after_stat(
+    path: &Path,
+    named_before: &fs::Metadata,
+) -> anyhow::Result<[u8; 32]> {
     let descriptor = open(
         path,
-        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
         Mode::empty(),
     )
     .context("open credentials key file")?;
@@ -713,7 +720,7 @@ fn write_manifest(path: &Path, manifest: &BackupManifest) -> anyhow::Result<()> 
 fn hash_regular_file(path: &Path) -> anyhow::Result<(u64, String)> {
     let fd = open(
         path,
-        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
         Mode::empty(),
     )
     .with_context(|| format!("open backup resource {}", path.display()))?;
@@ -972,11 +979,16 @@ impl SecureDirectory {
         let fd = openat2(
             &self.file,
             name,
-            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
             Mode::empty(),
             secure_resolve_flags(),
         )?;
         let metadata = fstat(&fd)?;
+        ensure!(
+            FileType::from_raw_mode(metadata.st_mode) == FileType::RegularFile
+                && metadata.st_nlink == 1,
+            "{name} is not a single-link regular file"
+        );
         ensure!(
             metadata.st_size >= 0 && metadata.st_size as u64 <= limit,
             "{name} is too large"
@@ -1089,6 +1101,27 @@ fn secure_resolve_flags() -> ResolveFlags {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn backup_resource_hash_rejects_fifo_without_waiting_for_a_writer() {
+        let root = tempfile::tempdir().unwrap();
+        let fifo = root.path().join("resource");
+        rustix::fs::mkfifoat(rustix::fs::CWD, &fifo, Mode::RUSR | Mode::WUSR).unwrap();
+        assert!(hash_regular_file(&fifo).is_err());
+    }
+
+    #[test]
+    fn credentials_key_rejects_fifo_replacement_after_stat() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("credentials.key");
+        fs::write(&path, STANDARD.encode([7_u8; 32])).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        let named_before = fs::symlink_metadata(&path).unwrap();
+        fs::rename(&path, root.path().join("original.key")).unwrap();
+        rustix::fs::mkfifoat(rustix::fs::CWD, &path, Mode::RUSR | Mode::WUSR).unwrap();
+        assert!(read_credentials_key_after_stat(&path, &named_before).is_err());
+    }
 
     const HOST_CURRENT_SCHEMA_SQL: &str =
         include_str!("../tests/fixtures/current/host-monitoring.sql");

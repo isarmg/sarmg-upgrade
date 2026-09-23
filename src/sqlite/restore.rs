@@ -763,7 +763,7 @@ fn copy_regular_file(
     let source = openat2(
         source_parent,
         source_name,
-        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
         Mode::empty(),
         super::secure_resolve_flags(),
     )?;
@@ -1128,7 +1128,7 @@ fn read_bounded_at(parent: &File, name: &str, limit: u64) -> anyhow::Result<Vec<
     let fd = openat2(
         parent,
         name,
-        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
         Mode::empty(),
         secure_resolve_flags(),
     )?;
@@ -1160,6 +1160,15 @@ mod tests {
         create_sqlite_backup,
         tests::{create_current_database, insert_test_record, test_record_count},
     };
+
+    #[test]
+    fn restore_journal_read_rejects_fifo_without_waiting_for_a_writer() {
+        let root = tempfile::tempdir().unwrap();
+        let fifo = root.path().join("restore-journal.json");
+        rustix::fs::mkfifoat(rustix::fs::CWD, &fifo, Mode::RUSR | Mode::WUSR).unwrap();
+        let directory = File::open(root.path()).unwrap();
+        assert!(read_bounded_at(&directory, "restore-journal.json", MAX_JOURNAL_BYTES).is_err());
+    }
 
     fn directory_bytes(path: &Path) -> BTreeMap<String, Vec<u8>> {
         fs::read_dir(path)
