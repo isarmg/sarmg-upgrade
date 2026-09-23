@@ -3,11 +3,11 @@
 ## 9.1 发行信任
 
 从干净 annotated tag 构建 source-bound binary，运行完整门禁，暂存 capability catalog、release metadata、
-CycloneDX SBOM、环境和 provenance。publish job 不 checkout source，以 Ed25519 签名 checksum。
+CycloneDX SBOM、环境和 provenance。publish job 检出事件提交以读取发行说明，以 Ed25519 签名 checksum；签名和打包只使用构建制品。
 
 正式发布只产生 `x86_64-unknown-linux-gnu` 制品。stage 阶段必须把 binary、source identity、support/catalog
 snapshot、SBOM、构建环境和 provenance 绑定在一起；finalize/publish 只消费已暂存且已验证的内容，不能在
-发布 job 重新 checkout 一个可能漂移的源码树。annotated tag、release 与 asset 都不覆盖。
+发布 job 从检出的源码树重新构建或运行脚本。annotated tag、release 与 asset 都不覆盖。
 
 发行公钥不是 publish job 临时生成的身份。源码固定
 `release/sarmg-upgrade-release-signing-public.pem`，DER SHA-256 为

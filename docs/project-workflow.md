@@ -149,7 +149,7 @@ clean checkout + annotated exact tag
  -> capture support/catalog
  -> generate SBOM/environment/provenance
  -> immutable build artifact
- -> publish job 不 checkout source
+ -> publish job 检出事件提交的发行说明，不构建或运行检出的源码
  -> Secret 私钥派生公钥必须等于 source-bound 唯一公钥与 metadata 指纹
  -> sign SHA256SUMS
  -> 解包复验 binary/support/checksum/public-key trust anchor
