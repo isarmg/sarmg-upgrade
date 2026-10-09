@@ -1,0 +1,81 @@
+{
+  "date_utc": "2026-10-07T08:15:57.069680+00:00",
+  "scope": "current tracked product text files; immutable history/archive bytes not rewritten",
+  "patterns": [
+    "tool name",
+    "dedicated deployment API",
+    "retired tool gate/protocol"
+  ],
+  "repos": [
+    {
+      "repo": "xczs",
+      "head_at_scan": "99ab8d54f020d4b8767b35c5b34031550834eb1a",
+      "runtime_tag": "v0.53.2",
+      "runtime_source_revision": "99ab8d54f020d4b8767b35c5b34031550834eb1a",
+      "references": []
+    },
+    {
+      "repo": "xsos",
+      "head_at_scan": "f4b544e135c5dbb185f59dceb1c21c577efc8286",
+      "runtime_tag": "v0.11.3",
+      "runtime_source_revision": "f4b544e135c5dbb185f59dceb1c21c577efc8286",
+      "references": []
+    },
+    {
+      "repo": "xszs",
+      "head_at_scan": "667f32ed6927effcea98b251793c28e5d5fe8341",
+      "runtime_tag": "v0.5.1",
+      "runtime_source_revision": "f874915f70b1055784321b1ab7b2bc1892b9abdd",
+      "references": []
+    },
+    {
+      "repo": "xscs",
+      "head_at_scan": "a6da04a3b2b4abf32ac0896cac4233104ffe21ab",
+      "runtime_tag": "v0.14.3",
+      "runtime_source_revision": "a6da04a3b2b4abf32ac0896cac4233104ffe21ab",
+      "references": []
+    },
+    {
+      "repo": "xcos",
+      "head_at_scan": "f7e329b9f4997bc888b8d20d7fdc9646114c05ed",
+      "runtime_tag": "v0.4.3",
+      "runtime_source_revision": "f7e329b9f4997bc888b8d20d7fdc9646114c05ed",
+      "references": []
+    },
+    {
+      "repo": "xocs",
+      "head_at_scan": "217df0807c2f265f4cf5613fa102c41a2dbb5ce3",
+      "runtime_tag": "v3.1.2",
+      "runtime_source_revision": "217df0807c2f265f4cf5613fa102c41a2dbb5ce3",
+      "references": []
+    },
+    {
+      "repo": "xsoc",
+      "head_at_scan": "d49b1533f0a187de6fc2a3a2e5dc63d8bfe30fa0",
+      "runtime_tag": "v0.10.0",
+      "runtime_source_revision": "3538971834b68af82eb8f6dab0a4e7b36105c27d",
+      "references": []
+    },
+    {
+      "repo": "xszc",
+      "head_at_scan": "5b36671ce76974d2df59f28fb23e06d6d34d9b44",
+      "runtime_tag": "v0.5.0",
+      "runtime_source_revision": "da7205639124f35052705f9c1752fe45ae1c2455",
+      "references": []
+    },
+    {
+      "repo": "xscc",
+      "head_at_scan": "3ed04f4e8ca4789609f93cffd74d551074bd5ec6",
+      "runtime_tag": "v0.4.0",
+      "runtime_source_revision": "6067e1317cbd367adfb12aa5e7a6f30332e8c233",
+      "references": []
+    },
+    {
+      "repo": "xcoc",
+      "head_at_scan": "2fcd2de94beafd6908f938f80b7e9c8ca372fd3d",
+      "runtime_tag": "v0.4.0",
+      "runtime_source_revision": "0b7a30f4444807a5fc8535f4b843c5ac0f12add3",
+      "references": []
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+help/version leave current directory unchanged: passed
+bad administrator password leaves target absent: passed
+unknown data refuses initialization/run and retains original bytes: passed
+explicit initialization and unchanged second-init refusal: passed
+read-only current config validation and CLI provenance: passed
+bad file/environment values cannot be hidden by a valid CLI override: passed
+validation reads WAL-only credential changes without modifying main/WAL/SHM: passed
+status rejects a real ready endpoint owned by another service: passed
+Traceback (most recent call last):
+  File "/tmp/poetize-cli-acceptance.py", line 187, in <module>
+    assert failure["code"] == "state.upgrade_pending"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError

@@ -1,0 +1,13 @@
+# 0.5.0 原生边界审核
+
+工具自己的生产 Rust 中保留五处 `unsafe` 块，集中在两个模块。SQLx 当前数据测试不使用原始 SQLite 指针，也不实现第二个驱动。第三方及 Foundation 的边界由其对应源码和验收记录负责，不算作本仓库已逐项验证的代码。
+
+| 位置 | 必要性与约束 | 安全替代及验证 |
+| --- | --- | --- |
+| `src/upgrade/execution.rs::account`，NSS 调用及初始化读取 | 按 systemd 普通 User 配置解析当前 uid/gid；CString、64 KiB scratch 和 `MaybeUninit` 输出在同步调用期间存活。只在返回成功且返回指针精确等于给定输出地址后读取整数字段。 | std 没有 NSS 账户解析 API；不增加 shell、无界命令输出或额外账户解析驱动。临时真实 uid/gid 65534 的产品演练和服务身份拒绝测试验证实际降权及文件属主。 |
+| `src/upgrade/execution.rs::group_id`，NSS 调用及初始化读取 | 同样固定 64 KiB、成功和输出指针检查；数字 GID 使用安全解析直接返回。 | 不读取或输出 NSS 内部字符串，安全错误不反射系统配置；普通 User/Group 与数据目录身份必须相符。 |
+| `src/upgrade/mod.rs::run_bounded_with_identity`，`Command::pre_exec` | fork 后固定 FD 4 执行已验证文件，清 supplementary groups 后降 gid/uid；父进程保持文件及祖先句柄。闭包只有固定 libc 描述符和凭据调用，无分配、锁或异步运行时。 | 管道 nonblocking 与辅助组查询改用安全 rustix。`Command::uid/gid` 不能单独完成 supplementary groups 清除和固定执行 FD 继承；不把可写暂存树交给服务 uid。双管道字节/时间限制与 kill+wait 风险测试、真实 uid 产品演练验证。 |
+
+测试模块 `product_tests.rs` 的独立程序控制器另有一处最小 fork 后 uid/gid 切换，仅用于真正产品进程和临时私有夹具，不接入生产 systemd 控制器、不创建系统账户或系统服务。
+
+0.5.0 在 Foundation Server `d6d61a866994f203b175e8a008fea02a025b4a15` 下的 27 项风险测试，以及官方 Xocs 3.1.3 当前格式的两项原样重装/失败恢复演练实际通过。演练证明配置、业务行、媒体和属主保持，并验证真实普通业务就绪；它不证明尚不存在的未来格式转换。日志归入本仓库验证目录，正式 CI 和签名发行另行核验。

@@ -1,0 +1,39 @@
+[package]
+name = "xssc"
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.99"
+authors = ["sarmg <isarmg@163.com>"]
+license = "Apache-2.0"
+description = "Offline verified current-release upgrades and complete recovery for Xcss products"
+publish = false
+
+[dependencies]
+libc = "0.2"
+anyhow = "1"
+clap = { version = "4.6.7", features = ["derive"] }
+xcss-contracts = { git = "https://github.com/isarmg/xcss.git", rev = "d58b9ef0822984ee0d29fb8b8139cfd2787374fb", version = "=1.0.0" }
+xcss-state-file = { git = "https://github.com/isarmg/xcss.git", rev = "d58b9ef0822984ee0d29fb8b8139cfd2787374fb", version = "=1.0.0" }
+xcss-fs-safety = { git = "https://github.com/isarmg/xcss.git", rev = "d58b9ef0822984ee0d29fb8b8139cfd2787374fb", version = "=1.0.0" }
+xcss-log = { git = "https://github.com/isarmg/xcss.git", rev = "d58b9ef0822984ee0d29fb8b8139cfd2787374fb", version = "=1.0.0" }
+xcss-sqlite = { git = "https://github.com/isarmg/xcss.git", rev = "d58b9ef0822984ee0d29fb8b8139cfd2787374fb", version = "=1.0.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rustix = { version = "1.1", features = ["fs", "process", "time"] }
+sha2 = "0.11"
+thiserror = "2"
+tempfile = "3"
+uuid = { version = "1", features = ["serde", "v4"] }
+sqlx = { version = "=0.9.0", default-features = false, features = ["sqlite-bundled"] }
+futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+
+[dev-dependencies]
+futures-executor = "0.3"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "symbols"
+
+[lints.rust]
+unsafe_code = "deny"

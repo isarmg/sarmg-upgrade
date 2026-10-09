@@ -1,0 +1,8 @@
+{
+  "version": "3.1.1",
+  "source_revision": "328b271819d4229cdf7f70e4bac22bb3c693590c",
+  "status": "withdrawn-not-published",
+  "binary_sha256": "60f790501d8dc0cc75bcf0185d2afd21dfc2b309c295b8423ed5fd5933555dec",
+  "reason": "用户要求独立停服后辅助升级工具；本地下一候选移除产品内工具专用命令、文档和路径约定，公共维护协议改为中性命名。",
+  "retagged": false
+}

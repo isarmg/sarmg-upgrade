@@ -1,0 +1,32 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.18s
+     Running unittests src/lib.rs (target/debug/deps/xssc-c45d514c44a256bb)
+
+running 2 tests
+test upgrade::product_tests::actual_current_product_preserves_state_and_becomes_business_ready ... {"timestamp":"2026-10-07T13:00:17.735Z","level":"INFO","service":"xssc","component":"maintenance","event":"xssc.phase_changed","message":"Upgrade phase changed.","scope":"server","task_id":"b11516a1-1969-439c-ad02-a3b7293065a4","attributes":{"phase":"maintenance-intent","product":"poetize"}}
+{"timestamp":"2026-10-07T13:00:17.755Z","level":"INFO","service":"xssc","component":"maintenance","event":"xssc.phase_changed","message":"Upgrade phase changed.","scope":"server","task_id":"b11516a1-1969-439c-ad02-a3b7293065a4","attributes":{"phase":"maintenance-acquired","product":"poetize"}}
+{"timestamp":"2026-10-07T13:00:19.923Z","level":"INFO","service":"xssc","component":"maintenance","event":"xssc.phase_changed","message":"Upgrade phase changed.","scope":"server","task_id":"b11516a1-1969-439c-ad02-a3b7293065a4","attributes":{"phase":"backup-started","product":"poetize"}}
+{"timestamp":"2026-10-07T13:00:20.164Z","level":"INFO","service":"xssc","component":"maintenance","event":"xssc.phase_changed","message":"Upgrade phase changed.","scope":"server","task_id":"b11516a1-1969-439c-ad02-a3b7293065a4","attributes":{"phase":"backup-complete","product":"poetize"}}
+{"timestamp":"2026-10-07T13:00:25.920Z","level":"INFO","service":"xssc","component":"maintenance","event":"xssc.phase_changed","message":"Upgrade phase changed.","scope":"server","task_id":"b11516a1-1969-439c-ad02-a3b7293065a4","attributes":{"phase":"validated","product":"poetize"}}
+{"timestamp":"2026-10-07T13:00:25.945Z","level":"INFO","service":"xssc","component":"maintenance","event":"xssc.phase_changed","message":"Upgrade phase changed.","scope":"server","task_id":"b11516a1-1969-439c-ad02-a3b7293065a4","attributes":{"phase":"switch-intent","product":"poetize"}}
+{"timestamp":"2026-10-07T13:00:35.516Z","level":"INFO","service":"xssc","component":"maintenance","event":"xssc.phase_changed","message":"Upgrade phase changed.","scope":"server","task_id":"b11516a1-1969-439c-ad02-a3b7293065a4","attributes":{"phase":"switched","product":"poetize"}}
+{"timestamp":"2026-10-07T13:00:35.542Z","level":"INFO","service":"xssc","component":"maintenance","event":"xssc.phase_changed","message":"Upgrade phase changed.","scope":"server","task_id":"b11516a1-1969-439c-ad02-a3b7293065a4","attributes":{"phase":"start-intent","product":"poetize"}}
+{"timestamp":"2026-10-07T13:00:38.613Z","level":"INFO","service":"xssc","component":"maintenance","event":"xssc.phase_changed","message":"Upgrade phase changed.","scope":"server","task_id":"b11516a1-1969-439c-ad02-a3b7293065a4","attributes":{"phase":"ready","product":"poetize"}}
+ok
+test upgrade::product_tests::actual_current_validation_failure_restores_current_group_and_real_readiness ... {"timestamp":"2026-10-07T13:00:51.630Z","level":"INFO","service":"xssc","component":"maintenance","event":"xssc.phase_changed","message":"Upgrade phase changed.","scope":"server","task_id":"83c73ddb-aa7f-47d4-acd1-43d6d16ccbe0","attributes":{"phase":"maintenance-intent","product":"poetize"}}
+{"timestamp":"2026-10-07T13:00:51.680Z","level":"INFO","service":"xssc","component":"maintenance","event":"xssc.phase_changed","message":"Upgrade phase changed.","scope":"server","task_id":"83c73ddb-aa7f-47d4-acd1-43d6d16ccbe0","attributes":{"phase":"maintenance-acquired","product":"poetize"}}
+{"timestamp":"2026-10-07T13:00:55.692Z","level":"INFO","service":"xssc","component":"maintenance","event":"xssc.phase_changed","message":"Upgrade phase changed.","scope":"server","task_id":"83c73ddb-aa7f-47d4-acd1-43d6d16ccbe0","attributes":{"phase":"backup-started","product":"poetize"}}
+{"timestamp":"2026-10-07T13:00:56.093Z","level":"INFO","service":"xssc","component":"maintenance","event":"xssc.phase_changed","message":"Upgrade phase changed.","scope":"server","task_id":"83c73ddb-aa7f-47d4-acd1-43d6d16ccbe0","attributes":{"phase":"backup-complete","product":"poetize"}}
+{"timestamp":"2026-10-07T13:01:08.610Z","level":"INFO","service":"xssc","component":"maintenance","event":"xssc.phase_changed","message":"Upgrade phase changed.","scope":"server","task_id":"83c73ddb-aa7f-47d4-acd1-43d6d16ccbe0","attributes":{"phase":"recovery-maintenance-intent","product":"poetize"}}
+{"timestamp":"2026-10-07T13:01:12.087Z","level":"INFO","service":"xssc","component":"maintenance","event":"xssc.phase_changed","message":"Upgrade phase changed.","scope":"server","task_id":"83c73ddb-aa7f-47d4-acd1-43d6d16ccbe0","attributes":{"phase":"recovery-restoring","product":"poetize"}}
+{"timestamp":"2026-10-07T13:01:18.040Z","level":"INFO","service":"xssc","component":"maintenance","event":"xssc.phase_changed","message":"Upgrade phase changed.","scope":"server","task_id":"83c73ddb-aa7f-47d4-acd1-43d6d16ccbe0","attributes":{"phase":"recovery-start-intent","product":"poetize"}}
+{"timestamp":"2026-10-07T13:01:19.767Z","level":"INFO","service":"xssc","component":"maintenance","event":"xssc.phase_changed","message":"Upgrade phase changed.","scope":"server","task_id":"83c73ddb-aa7f-47d4-acd1-43d6d16ccbe0","attributes":{"phase":"rolled-back","product":"poetize"}}
+ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 28 filtered out; finished in 75.32s
+
+     Running unittests src/main.rs (target/debug/deps/xssc-8e7ec397e59ee1d5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
