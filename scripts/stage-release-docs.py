@@ -151,7 +151,7 @@ def entry_documents(version):
     return {
         "README.md": (
             f"# xssc {version}\n\n"
-            "Linux AMD64 GNU 离线维护工具。先停止全部持久状态 writer，再以独立可信身份验证程序和计划。\n\n"
+            "Linux AMD64 GNU 离线维护工具。先停止全部持久状态写入进程，再以独立可信身份验证程序和计划。\n\n"
             "- [操作、恢复和发行条件](docs/operations.md)\n"
             "- [受签名发行物的完整升级合同](docs/offline-upgrades.md)\n"
             "- [Linux 安装、诊断和卸载](docs/platform-setup.md)\n\n"

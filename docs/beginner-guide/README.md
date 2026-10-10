@@ -6,7 +6,7 @@
 2. [环境与首次验证](02-safe-environment-and-first-validation.md)
 3. [文件系统、SQLite 与持久性](03-filesystem-sqlite-and-durability-basics.md)
 4. [能力、签名和备份](04-capabilities-manifests-and-backup.md)
-5. [Journal 与中断恢复](05-restore-journal-and-crash-recovery.md)
+5. [事务日志与中断恢复](05-restore-journal-and-crash-recovery.md)
 6. [产品权威与保护范围](06-product-authority-and-protected-state.md)
 7. [当前合同与范围](07-current-contracts-and-scope.md)
 8. [测试与产品接入](08-testing-debugging-and-product-integration.md)

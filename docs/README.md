@@ -1,6 +1,6 @@
 # xssc 文档
 
-本文档描述 `1.0.0` 候选当前到未来版本的统一升级流程。正式目标为 Linux AMD64 GNU；工具没有常驻服务或前端。`support --json` 列出六个 Server 的统一机制支持。实际资源、结构和部署方式始终由产品当前校验与签名目标定义决定。
+本文档描述 `1.0.0` 候选当前到未来版本的统一升级流程。正式目标为 Linux AMD64 GNU；工具没有常驻服务或前端。`support --json` 列出六个服务端的统一机制支持。实际资源、结构和部署方式始终由产品当前校验与签名目标定义决定。
 
 | 文档 | 读者任务 |
 |---|---|
@@ -13,7 +13,7 @@
 | [产品仓库](server-client-repositories.md) | 确认产品权威输入的归属 |
 | [1.0.0 候选](releases/1.0.0.md) | 查看本轮范围和验证边界 |
 
-本工具只依赖一个 `xcsc` 包，启用 `offline-maintenance` feature；`xcsc::contracts`、`xcsc::state_file`、`xcsc::fs_safety`、`xcsc::log` 和 `xcsc::sqlite` 均为内部模块。该包固定官方 Git source、精确 `=1.0.0` 与完整 revision `c4ad7383d079efb5903872ddb66a8386ef406121`。本工具拥有编排、签名/发行策略、文件快照及恢复状态机；产品拥有结构和业务约束。SQLite 用于当前状态的有界只读验证和产品测试；它不提供任意 SQL hook 或运行时历史兼容。
+本工具只依赖一个 `xcsc` 包，启用 `offline-maintenance` 特性；`xcsc::contracts`、`xcsc::state_file`、`xcsc::fs_safety`、`xcsc::log` 和 `xcsc::sqlite` 均为内部模块。该包固定官方 Git 来源、精确 `=1.0.0` 与完整提交修订 `c45e48e93e360542c2e1db6c6441a9e29b344b03`。本工具拥有编排、签名/发行策略、文件快照及恢复状态机；产品拥有结构和业务约束。SQLite 用于当前状态的有界只读验证和产品测试；它不提供任意 SQL 钩子或运行时历史兼容。
 
 当前共享输入是 xcsc 单体；历史 0.6.0 原生 CI 与正式发行记录仅证明其当时输入。1.0.0 的源码、原生 CI 与签名制品证据独立记录，不能继承上个版本的发行结论。
 

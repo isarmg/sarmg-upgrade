@@ -9,8 +9,8 @@ cargo test --locked --all-targets --all-features
 python3 -m unittest discover -s scripts/tests -v
 ```
 
-实际 UID65534 的 root 夹具验证私有状态、清 supplementary groups、固定 root-owned ELF、selector 保护及逐项属主恢复。普通非root CI 跳过该特定身份分支；本地真实root测试结果另行记录。
+实际 UID65534 的 root 夹具验证私有状态、清辅助组、固定的 root 属主 ELF、选择链接保护及逐项属主恢复。普通非root CI 跳过该特定身份分支；本地真实root测试结果另行记录。
 
-排错先读取 `inspect-upgrade`，核对 phase、完整备份、实际已装程序/Root、门和修改状态。错误码稳定，内部错误链和敏感 stderr 不进入普通输出。不能删门、手改 journal 或强制重跑。
+排错先读取 `inspect-upgrade`，核对阶段字段、完整备份、实际已装程序/发行根目录、门和修改状态。错误码稳定，内部错误链和敏感 stderr 不进入普通输出。不能删门、手改事务日志或强制重跑。
 
-本工具维护普通产品诊断接口、当前真实状态与完整 state_paths 的受控接入定义，并按实际发行目录制作签名制品；锁与日志使用 xcsc 内部模块，产品业务校验由产品普通诊断负责。真实结构变化只有到那次发行时才实施转换并验证失败恢复。
+本工具维护普通产品诊断接口、当前真实状态与完整 `state_paths` 的受控接入定义，并按实际发行目录制作签名制品；锁与日志使用 xcsc 内部模块，产品业务校验由产品普通诊断负责。真实结构变化只有到那次发行时才实施转换并验证失败恢复。

@@ -1,12 +1,12 @@
 # xssc 安装、检查与卸载
 
-适用于 `xssc 1.0.0`。当前只发布 **Linux x86_64 GNU** 命令行工具，用于本机 systemd 管理的 Server 离线升级；没有 Windows、macOS、Android 或 iOS 执行包。需要 Linux x86_64 主机、GNU 用户空间、systemd，以及支持 Ed25519 的 `/usr/bin/openssl`。六个 Server 的升级条件和完整恢复合同见[离线升级与恢复](offline-upgrades.md)。
+适用于 `xssc 1.0.0`。当前只发布 **Linux x86_64 GNU** 命令行工具，用于本机 systemd 管理的服务端离线升级；没有 Windows、macOS、Android 或 iOS 执行包。需要 Linux x86_64 主机、GNU 用户空间、systemd，以及支持 Ed25519 的 `/usr/bin/openssl`。六个服务端的升级条件和完整恢复合同见[离线升级与恢复](offline-upgrades.md)。
 
-xssc 不连接客户端账户，**无需配对或重新配对**；产品签名公钥、独立可信指纹和私有升级计划决定授权范围。公钥轮换应由发布者提供新的可信发行与信任说明，不用 Client 实例授权码替代。xssc 也**没有常驻服务、开机启动项或 `service start/stop` 命令**。下文区分工具进程与被维护的 Server 服务。
+xssc 不连接客户端账户，**无需配对或重新配对**；产品签名公钥、独立可信指纹和私有升级计划决定授权范围。公钥轮换应由发布者提供新的可信发行与信任说明，不用客户端实例授权码替代。xssc 也**没有常驻服务、开机启动项或 `service start/stop` 命令**。下文区分工具进程与被维护的服务端服务。
 
 ## 1. 检查平台并安装依赖
 
-先在 Server 所在主机执行只读检查：
+先在服务端所在主机执行只读检查：
 
 ~~~sh
 # 核对操作系统和架构：必须是 Linux / x86_64。
@@ -44,7 +44,7 @@ sudo dnf install --assumeyes ca-certificates curl openssl zstd tar coreutils pro
 
 ## 2. 下载、校验与验签
 
-从 [xssc Releases](https://github.com/isarmg/xssc/releases) 选择 `v1.0.0`，下载实际资产 `xssc-1.0.0-linux-x86_64.tar.zst` 及 `xssc-1.0.0-linux-x86_64.tar.zst.sha256`。当前不单独发布外置 `SHA256SUMS.sig`：**签名、内部文件清单和公钥都在压缩包内**。准备独立可信渠道确认的 xssc 发行公钥 DER SHA-256 指纹，不能把包内 `release.json` 中的指纹当作独立信任来源。
+从 [xssc 发布页](https://github.com/isarmg/xssc/releases) 选择 `v1.0.0`，下载实际资产 `xssc-1.0.0-linux-x86_64.tar.zst` 及 `xssc-1.0.0-linux-x86_64.tar.zst.sha256`。当前不单独发布外置 `SHA256SUMS.sig`：**签名、内部文件清单和公钥都在压缩包内**。准备独立可信渠道确认的 xssc 发行公钥 DER SHA-256 指纹，不能把包内 `release.json` 中的指纹当作独立信任来源。
 
 以下命令在普通用户的独立下载目录执行。先解压和验签，全部通过后才运行包中的程序：
 
@@ -104,13 +104,13 @@ sudo install -o root -g root -m 0755 bin/xssc /usr/local/bin/xssc
 command -v xssc
 ~~~
 
-版本必须为 `xssc 1.0.0`，`support --json` 的 `compiled_target` 和 `formal_release_target` 应为 `x86_64-unknown-linux-gnu`，`source_revision` 应与此 Release 的正式源码提交一致。核对包内 `release.json` 和 `adapter-catalog.json`，保留完整安装包作为验收依据。若 `command -v` 未指向 `/usr/local/bin/xssc`，后续使用绝对路径；sudo 的 PATH 也可能与当前终端不同。
+版本必须为 `xssc 1.0.0`，`support --json` 的 `compiled_target` 和 `formal_release_target` 应为 `x86_64-unknown-linux-gnu`，`source_revision` 应与此发行版本的正式源码提交一致。核对包内 `release.json` 和 `adapter-catalog.json`，保留完整安装包作为验收依据。若 `command -v` 未指向 `/usr/local/bin/xssc`，后续使用绝对路径；sudo 的 PATH 也可能与当前终端不同。
 
 ## 4. 配置与执行升级
 
 xssc 没有全局账户配置或配对数据库；每次事务使用独立的私有 JSON 计划，写入真实 unit、配置、数据范围、可信产品公钥以及全新 `work_directory`。计划字段和权限要求按[完整操作合同](offline-upgrades.md#执行升级)填写，不能直接使用文档中的示例路径或身份。root 管理系统级部署，产品配置及私有数据仍由实际服务 UID/GID 持有。
 
-以下示例的 `xocs.service` 必须换成本机目标主 unit；有 MediaMTX 等额外 writer 时，全部停止并核验，不能只停主服务：
+以下示例的 `xocs.service` 必须换成本机目标主服务单元；有 MediaMTX 等额外写入进程时，全部停止并核验，不能只停主服务：
 
 ~~~sh
 # 设定已经确认的实际目标 unit 名，供后续只读诊断和停服使用。
@@ -128,11 +128,11 @@ sudo /usr/local/bin/xssc apply-upgrade --plan /absolute/private/upgrade-plan.jso
 sudo /usr/local/bin/xssc inspect-upgrade --work-directory /absolute/private/recovery
 ~~~
 
-工具不会下载或主动停止 Server，也不修改 unit；成功切换后会按计划启动并验证产品真实业务 ready。事务中不要人工替换二进制、启动 Server 或打开另一套升级器。不存在无损暂停子命令；关闭终端或终止进程可能中断事务，重新操作前必须检查持久记录。
+工具不会下载或主动停止服务端，也不修改 unit；成功切换后会按计划启动并验证产品真实业务就绪。事务中不要人工替换二进制、启动服务端或打开另一套升级器。不存在无损暂停子命令；关闭终端或终止进程可能中断事务，重新操作前必须检查持久记录。
 
 ## 5. 查看、诊断与恢复
 
-查看 xssc 使用命令输出、退出码和本次恢复目录的 journal；它没有自己的 systemd 日志服务。以下 Server 状态与日志命令只读：
+查看 xssc 使用命令输出、退出码和本次恢复目录的事务日志；它没有自己的 systemd 日志服务。以下服务端状态与日志命令只读：
 
 ~~~sh
 # 显示本机是否仍有 xssc 进程及其参数；无输出通常表示当前没有进程。
@@ -147,15 +147,15 @@ sudo /usr/local/bin/xssc inspect-upgrade --work-directory /absolute/private/reco
 sudo /usr/local/bin/xssc recover-upgrade --work-directory /absolute/private/recovery
 ~~~
 
-`pgrep` 查看的是工具进程，不能代替事务状态或 Server 业务验收。`inspect-upgrade` 的错误也不能当作没有发生修改。空间不足、权限、身份、签名或备份损坏时，保存原输出和恢复目录，按[失败恢复](offline-upgrades.md#失败恢复与数据损失授权)处理；不要手改 journal、删维护门或自行启动服务。
+`pgrep` 查看的是工具进程，不能代替事务状态或服务端业务验收。`inspect-upgrade` 的错误也不能当作没有发生修改。空间不足、权限、身份、签名或备份损坏时，保存原输出和恢复目录，按[失败恢复](offline-upgrades.md#失败恢复与数据损失授权)处理；不要手改事务日志、删维护门或自行启动服务。
 
 恢复默认保护运行权交接后的业务写入；返回 `RECOVERY_AUTHORIZATION_REQUIRED` 时保留现状。只有明确接受丢弃备份后的写入，才按完整合同使用 `--allow-data-loss`，不要把该选项作为常规重试。工具没有普通“重新配对”来修复签名或状态错误。
 
-日常 Server 的启停仍按对应产品部署文档使用 `systemctl start/stop/restart`；这些命令改变 Server 运行状态。已有未结束的升级/恢复事务时先完成恢复流程，不能通过直接启动或重启绕过维护门。成功事务已由工具启动服务，不需要再手工启动一次。
+日常服务端的启停仍按对应产品部署文档使用 `systemctl start/stop/restart`；这些命令改变服务端运行状态。已有未结束的升级/恢复事务时先完成恢复流程，不能通过直接启动或重启绕过维护门。成功事务已由工具启动服务，不需要再手工启动一次。
 
 ## 6. 更新或卸载工具
 
-更新 xssc 自身时先确保没有运行中的工具进程或未结束的升级事务。按目标 Release 重新下载、核对独立信任身份和验签，保存到新的版本目录后安装新二进制，再检查 `--version`、`support --json` 和实际命令路径；不改现有计划、恢复目录或 Server 数据。不用删除工具来修复进行中的事务。
+更新 xssc 自身时先确保没有运行中的工具进程或未结束的升级事务。按目标发行版本重新下载、核对独立信任身份和验签，保存到新的版本目录后安装新二进制，再检查 `--version`、`support --json` 和实际命令路径；不改现有计划、恢复目录或服务端数据。不用删除工具来修复进行中的事务。
 
 卸载适用于已完成事务并确实不再需要此工具的主机。先确认当前 PATH 和进程，以下删除范围仅是本指南创建的安装：
 
@@ -173,5 +173,5 @@ test ! -e /usr/local/bin/xssc
 command -v xssc
 ~~~
 
-xssc 不安装系统账户或服务，无需 `systemctl disable`、`daemon-reload` 或账户删除。上述卸载保留私有计划、签名信任锚、事务备份和 Server 配置/数据；这些内容按实际保留需求单独管理。完成记录可用于审计，未结束事务的证据与恢复目录必须保留。
+xssc 不安装系统账户或服务，无需 `systemctl disable`、`daemon-reload` 或账户删除。上述卸载保留私有计划、签名信任锚、事务备份和服务端配置/数据；这些内容按实际保留需求单独管理。完成记录可用于审计，未结束事务的证据与恢复目录必须保留。
 
