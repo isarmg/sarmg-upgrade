@@ -1,8 +1,8 @@
-# 受签名发行物的离线升级与恢复
+# 离线升级与恢复
 
-`apply-upgrade` 将确认已停服、独占维护、备份、校验、二进制切换、运行权交接和业务就绪检查组织为一个有持久记录的流程。xsos、xszs、xscs、xcos、xczs 和 xocs 通过相同流程接入，产品只提供自身普通只读校验与发行身份；升级定义及制品打包只在本工具维护。
+本页面向维护 xsos、xszs、xscs、xcos、xczs 或 xocs 的操作者。xssc 将停服检查、签名验证、完整快照、软件切换和业务就绪组织为一次有持久记录的事务。
 
-仅支持本轮当前基线到未来版本的升级。当前实现要求源和目标 `SchemaIdentity` 完全相同，由当前程序和封存目标分别验证实际状态。未来真实发行改变数据结构时，再随该次发行增加明确转换；该受签名流程不登记历史结构、不制造虚拟未来结构。当前不提供历史结构适配。未知或损坏状态返回 `STATE_INCOMPATIBLE` 或状态校验错误，并保护原状态。
+先按[安装指南](platform-setup.md)安装并验证工具，再准备发行方提供的目标制品和本机计划。当前支持源与目标 `SchemaIdentity` 完全相同的程序更新；软件版本与数据格式身份分别核验。
 
 ## 运行条件
 
@@ -13,56 +13,6 @@
 - 服务的 `/readyz` 返回 HTTP 200、JSON `{"ready":true}`，带与产品身份一致的 `x-service`。关键业务依赖不可用时不得就绪。
 - root 可管理独立服务 UID 的物理 0700 状态目录，普通运行者仍必须是目录实际属主。工具验证 systemd 固定 User/Group 与数据 UID/GID 一致，清辅助组后降权执行产品校验。配置父目录必须由该服务用户持有且可访问，JSON 文件为私有 0600。DynamicUser 暂不支持。
 - 全部输入使用绝对规范路径。除下文唯一受控 `current` 入口外，链接、特殊文件、多链接文件、组或其他用户可写对象、重叠保护根均拒绝。恢复保留实际 UID/GID、权限和内容；xattr/ACL、稀疏布局和硬链接关系不在支持合同内。
-
-## 制作受信任升级制品
-
-升级发布者在本工具维护受控产品定义，并从普通产品发行诊断取得严格 `ReleaseIdentity` 及真实状态合同。产品仓库没有升级定义、专用命令或工具依赖。工具定义精确绑定当前软件的普通发行身份，并包含相同源/目标状态身份、必需资源、额外数据写入进程角色及可选完整发行目录：
-
-```json
-{
-  "source_identity": {
-    "product": "xocs",
-    "version": "1.0.0",
-    "source_revision": "由当前正式程序release-identity取得的40位小写Git提交",
-    "target": "x86_64-unknown-linux-gnu",
-    "state_contract_sha256": "由当前正式程序release-identity取得的64位小写SHA256"
-  },
-  "source_schema": {
-    "application": "xocs",
-    "application_version": "xocs-db-v1",
-    "schema_revision": 1,
-    "schema_sha256": "由产品实际结构定义取得的64位小写SHA256"
-  },
-  "target_schema": {
-    "application": "xocs",
-    "application_version": "xocs-db-v1",
-    "schema_revision": 1,
-    "schema_sha256": "与源结构相同的64位小写SHA256"
-  },
-  "resources": [
-    {"name": "config", "kind": "file"},
-    {"name": "data", "kind": "directory"}
-  ]
-}
-```
-
-定义仅接受 `source_identity`、`source_schema`、`target_schema`、`resources` 和可选 `artifact`、`additional_service_roles`。源/目标不同、额外字段、任意命令或钩子均拒绝。稳定的数据格式标签可以低于软件版本；保持标签稳定不代表程序来自旧发行。
-
-以上是 xocs `1.0.0` 的字段模板，不能直接作为升级定义执行。`source_identity` 的完整五字段应逐字取自本实例当前正式程序的 `release-identity --json`；源码提交和状态合同摘要不可使用其他发行版本的值。当前状态身份为 `application=xocs`、`application_version=xocs-db-v1`、`schema_revision=1`，结构摘要应取自当前程序的 `config validate --json`。其他产品使用自己的真实当前身份。工具在任何协调锁、事务日志或维护门改写之前，以当前程序的 `release-identity` 逐字段核验 `source_identity`。不符返回 `CURRENT_RELEASE_INCOMPATIBLE`，不会以结构碰巧一致接纳其他软件发行。定义与发行输入已经完成校验后，发布者使用集中脚本：
-
-```sh
-python3 scripts/stage-upgrade-release.py \
-  --binary /absolute/release/xocs \
-  --identity /absolute/release/release-identity.json \
-  --definition /absolute/xssc/definitions/xocs.json \
-  --private-key /absolute/private/signing.pem \
-  --trusted-public-key /absolute/product/release-signing-public.pem \
-  --output /absolute/new-upgrade-package
-```
-
-脚本拒绝既有输出目录、错误平台和与源码绑定公钥不匹配的私钥，生成精确字节签名的 `upgrade-release.json` 与 `upgrade-release.sig`。私钥不进入制品。发行标识、源码修订、目标、二进制 SHA-256、源/目标结构及必需资源定义都在签名范围内。
-
-操作方从独立可信渠道取得并固定产品公钥的 DER SHA-256。不能把下载包自带的公钥或摘要当作信任来源。计划中的公钥与指纹必须来自该预先确定的信任锚。
 
 ## 执行升级
 
@@ -114,25 +64,11 @@ xssc inspect-upgrade --work-directory /srv/backups/xocs-upgrade-unique-id
 
 就绪必须同时证明 unit 活跃、实际 MainPID 运行指定路径及目标 SHA-256、正确产品的 `/readyz` 业务检查通过。进程存在、端口可连或一条退出成功的启动命令都不足以完成升级。
 
+成功结果为 `ready`，表示实际目标进程与业务就绪均已通过。保存本次输出、计划和恢复目录，便于之后检查。
+
 ## 阶段与中断
 
-| 持久阶段 | 已证明的完成条件 |
-|---|---|
-| `prechecked` | 已确认服务停止、验证签名目标并封存，计划与原二进制身份已记录 |
-| `maintenance-intent` | 维护意图已记录，维护门保护后续正常启动 |
-| `maintenance-acquired` | 所有声明的 unit 仍停止，持有数据目录独占维护权 |
-| `backup-started` | 正在备份；部分备份不可用于恢复 |
-| `backup-complete` | 旧程序、配置和数据整组清单/摘要已验证 |
-| `validated` | 源/目标结构与资源范围验证通过，最终只读验证未发生意外写入 |
-| `switch-intent` | 切换意图已持久化；检查实际程序 SHA 判断是否已完成原子替换 |
-| `switched` | 目标二进制实际摘要通过 |
-| `start-intent` | 交接已持久化；无论后续命令/观察结果如何，均视为可能产生新写入 |
-| `ready` | 指定目标进程与产品业务就绪均已验证 |
-| `recovery-maintenance-intent` / `recovery-restoring` | 确认所有写入进程已停，设置维护门并持有独占权后，正在恢复原整组状态；允许在门保护下续接 |
-| `recovery-start-intent` | 原程序取得运行权，亦可能产生恢复后的新写入 |
-| `rolled-back` | 原程序、配置和数据对应，原程序业务就绪通过；或未变更的预检查记录已关闭 |
-
-每次记录写入先同步私有事务日志，再进入下一阶段。门和目录均同步。`inspect-upgrade` 重新校验已完成备份，并报告实际已安装程序属于原版、目标版、未知或不可读，维护门是否存在，以及当前状态是否仍与备份相符；未能读取或验证不等于未修改。
+使用 `inspect-upgrade` 查看阶段、已验证快照、实际程序身份和维护门状态。完整字段含义见[事务阶段参考](reference/transaction-stages.md)。
 
 ## 失败恢复与数据损失授权
 
@@ -155,46 +91,14 @@ xssc recover-upgrade \
 
 恢复自己的启动也采用同样规则：若 `recovery-start-intent` 中断，下一次重新恢复不能默认丢弃原程序随后产生的写入。完成的恢复再次执行只报告既有结果，不重复恢复。
 
+## 制作受信任升级制品
+
+发行维护者按[制品制作参考](reference/release-artifacts.md#制作受信任升级制品)准备源身份、目标文件和签名定义。产品签名公钥指纹通过独立可信渠道交付给操作者。
+
 ## 完整发行目录与权限分工
 
-本工具的受控定义与签名清单提供部署权威。`artifact` 缺省为单 ELF；完整发行根目录使用严格 `immutable-release-root-v1` 对象，声明 `root_layout`、`entrypoint` 和树摘要。定义必须来自真实当前产品正式交付方式：包含网页资源/MediaMTX 等完整目录的产品不能用仅含二进制制品通过其普通当前状态校验。产品只提供自己的普通诊断和运行入口。额外字段和未知协议拒绝；工具不根据软件版本猜数据格式。
-
-
-完整发行根目录的签名定义新增 `artifact`，由本工具受控定义声明 `protocol`、`root_layout`、`entrypoint`，打包工具使用 `--release-root` 计算并补入 `tree_sha256`。目录和文件模式逐项参与签名，允许产品原有 0755/0644 或 0555/0444 模式；必须同一可信属主，拒绝组/其他用户写入、特殊位、特殊对象、硬链接和任意符号链接。不能把产品权限模式清单改成另一组值来满足升级工具。树摘要是 `immutable-release-root-v1\n` 后接 UTF-8 紧凑 JSON：深度优先前序遍历、每目录兄弟项按文件名排序、根相对路径为空字符串，每项字段精确顺序 `path,directory,mode,bytes,sha256`。目录 bytes=0/摘要空，文件摘要是原字节 SHA256。单棵树上限 200 万项、128 层及计划 byte budget。
-
-完整目录可选签名字段 `diagnostic_release_root_env`，例如 xcos 已有的普通 `XCOS_RELEASE_ROOT`。只接受长度不超过64的大写 `*_RELEASE_ROOT` 名称。工具清环境后，仅在 `config validate` 注入这个变量；值由已固定执行文件和签名 `entrypoint` 导出对应物理发行根目录，操作者不能另填值。没有任意环境或 shell 钩子。xsos、xszs、xscs 的普通配置校验不需要该字段。
-
-计划新增唯一部署选择对象，示例：
-
-```json
-"native_release": {
-  "current_link": "/opt/isarmg/xcos/current",
-  "source_root": "/opt/isarmg/xcos/releases/当前实际版本",
-  "install_root": "/opt/isarmg/xcos/releases/未来实际目标版本"
-}
-```
-
-`installed_binary` 必须为 `current_link/entrypoint`，输入发行根目录与安装发行根目录都必须保留签名 `root_layout` 的物理后缀。只有名为 `current` 的受控单跳绝对符号链接可选择其同级 `releases` 中声明的两棵物理树；重复斜线、`./`、`..`、任意别名和未知对象拒绝。原服务单元在初始化部署时必须已经使用该受支持入口；工具不改 unit，不给未知旧 CLI 包装壳。封存和验证整棵目标后，工具将完整目录以 NOREPLACE 发布，然后原子替换 `current` 并同步目录。已有目标目录必须逐项一致。当前父目录身份与原发行根目录 inode 记录在事务日志中，另一数据目录也不能并行切换同一部署。
-
-原完整发行根目录和全部持久资源属于同一个已完成备份组。恢复保留原发行根目录；若原 inode 仍在但资产损坏，先持久化修复意图，将损坏树移到 `.upgrade-displaced-original-操作ID` 留证，重建原树并切回选择链接。发生在移开原发行根目录后的中断，可凭固定原 inode/持久意图/完整备份继续；未知替换 inode、悬空 link 和损坏备份均拒绝覆盖。未完成发布的暂存树保留，不猜测删除。
-
-对于 root 管理程序目录、独立服务 UID 持有数据的部署，工具采用 xcsc 1.0.0 的客户端离线维护与文件保护入口；被维护产品仍实施既定运行属主与权限规则。行政入口仅允许实际属主或 root，数据目录必须物理 0700，root 创建的维护锁/门继承目录实际 UID/GID 和 0600。主 systemd 固定 User/Group 必须与数据目录属主一致，DynamicUser 暂不支持。产品 config JSON 也必须供实际服务 UID 读取；工具不把管理员环境或仅 root 可读的 EnvironmentFile 内容偷偷注入验证进程。
-
-事务日志和私密备份保持操作者 0700。为独立服务 UID 执行只读验证，公开发行闭包封存在安装父目录下 root 持有的 `.xssc-execution-操作ID`；它及祖先可遍历但不能由服务 UID、组或其他用户修改。工具先 NOFOLLOW 打开固定 ELF FD，再继承 FD4执行；清辅助组、切实际 GID/UID，并清环境。父进程保留排他维护锁，子进程只校验当前状态；没有迁移授权通道。持久资源另外记录逐项 UID/GID，恢复保留原属主、权限和内容；协议锁/门保持原 inode。辅助命令 stdout/stderr 同时非阻塞读取，各自最多 1MiB，超限/超时 kill+wait，stderr不进入普通错误说明。
+使用 `current` 选择完整发行目录的产品，在计划中填写 `native_release`。字段、树摘要和权限分工见[完整发行目录参考](reference/release-artifacts.md#完整发行目录与权限分工)。
 
 ## 验证边界
 
-机制测试实际执行 Ed25519 验签、完整二进制/发行根目录/配置/数据复制、资源覆盖、模式/属主/链接限制、排他锁、持久阶段及恢复。覆盖完整发行根目录的中断修复、验证器意外写入、超限子进程回收、启动后新写入保护和损坏备份拒绝。实际 UID65534 夹具证明私有 0700/0600 状态可降权校验，root 控制的程序和选择链接不可被服务用户修改，整组恢复仍保留服务属主。
-
-按需运行真实当前产品测试：
-
-```sh
-XSSC_TEST_XOCS_BINARY=/absolute/controlled/current/xocs \
-  cargo test --locked --lib upgrade::product_tests -- --ignored --test-threads=1
-```
-
-测试使用真实当前 `init` 建库、当前结构校验、当前 `run` 和 HTTP 业务就绪，核对会员、文章、管理记录、审计和媒体保留；验证故障后原程序/配置/数据库/媒体整组恢复及真实原程序就绪。此演练使用同一实际当前发行物进行同结构重装，不把尚不存在的未来版本当成已验证制品。
-
-产品测试替换 systemd 生命周期管理，实际程序、进程 UID、exe 路径/摘要与 HTTP 检查不替换。真实产品测试和生产命令均要求真实绑定源码编译发行身份，拒绝未绑定源码的开发程序；纯机制测试的观察替身另行标明。真实 systemd、六产品的正式完整资产和各平台验证另行记录，不能用测试夹具代替。
-
-历史实现曾删除预基线的独立 `backup-current`、xszs 和带密钥的 SQLite 适配器：它们硬绑定旧配置文件名/结构，不能验证本轮当前私有 JSON 与产品合同。删除依据是合同不匹配，不是数据版本数字小于软件版本。当前 `1.0.0` 的整组快照和中断恢复由以上统一流程完成；当前唯一发布标签为 `v1.0.0`，历史验收记录仅供追溯。
+开发构建、机制测试和真实产品演练见[构建与测试](development.md)。历史执行记录见[验证台账](validation.md)，其中每份结果只适用于记录的源码和环境。
