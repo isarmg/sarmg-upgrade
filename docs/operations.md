@@ -2,7 +2,7 @@
 
 工具仅在 Linux x86_64 GNU 运行，没有账户配对或常驻服务。首次安装、发行包验签、命令路径检查和工具卸载见[部署指南](platform-setup.md)；本页关注被维护的 Server 事务与恢复。
 
-使用 `support --json` 与 `--help` 确认当前构建能力。`1.0.0` 支持六个当前 Server 到未来同结构发行物的统一升级；xcss 无服务状态。产品校验声明全部保护资源，发行签名绑定精确目标，软件和数据版本分别验证。
+使用 `support --json` 与 `--help` 确认当前构建能力。`1.0.0` 支持六个当前 Server 到未来同结构发行物的统一升级。产品校验声明全部保护资源，发行签名绑定精确目标，软件和数据版本分别验证。
 
 ## 操作步骤
 
@@ -55,9 +55,9 @@ root 环境额外运行实际 UID65534 的安全演练，不创建系统用户�
 
 只生成唯一 Linux AMD64 GNU 制品。`scripts/stage-release.sh` 要求源码 clean、对应 annotated 软件 tag，将完整当前HEAD作为严格编译输入，进行 locked release 构建并打包 binary、真实 support JSON、文档和源码绑定公钥。`scripts/finalize-release.sh` 核对事件 revision/version、binary/catalog hash 与签名公钥，还在打开签名私钥前实际执行有界 binary support/version，逐项复核编译source/target、catalog与provenance，再签名和解包自验证。
 
-离线包根说明入口链接到 `docs/` 的原始相对结构；`scripts/stage-release-docs.py` 从运维、完整升级合同和 xscs 准备说明递归封装相对引用，检查本地锚点、越界/链接输入及既有文件覆盖。签名前和解包后再次验证实际文件，缺少准备说明或任一后续引用时拒绝签名。全部封装文档由同一 `SHA256SUMS` 和签名覆盖。
+离线包根说明入口链接到 `docs/` 的原始相对结构；`scripts/stage-release-docs.py` 从运维、完整升级合同和部署指南递归封装相对引用，检查本地锚点、越界/链接输入及既有文件覆盖。签名前和解包后再次验证实际文件，缺少部署指南或任一后续引用时拒绝签名。全部封装文档由同一 `SHA256SUMS` 和签名覆盖。
 
-工具只依赖一个 `xcsc =1.0.0` 包，显式启用 `offline-maintenance`；完整 revision、官方 URL 与 `Cargo.lock` 精确绑定，不使用邻仓 path 或远端自动 fallback。`contracts`、`state_file`、`fs_safety`、`log`、`sqlite` 是该 Client 包内的模块。被维护的 Server 继续使用自身 `xcss` runtime 的严格属主规则。
+工具只依赖一个 `xcsc =1.0.0` 包，显式启用 `offline-maintenance`；完整 revision、官方 URL 与 `Cargo.lock` 精确绑定，不使用邻仓 path 或远端自动 fallback。`contracts`、`state_file`、`fs_safety`、`log`、`sqlite` 是该 Client 包内的模块。维护仍遵循被维护产品的运行属主与权限合同。
 
 本地冻结、受控缓存/离线构建、正式远端 CI 和公开发行分别记录。每次正式发行都独立核验其完整源码、CI 和回下载资产，不以本地缓存解析代替远端可获取证明。当前唯一发布标签为 `v1.0.0`；历史验收记录用于追溯，不作为当前发行制品的说明。
 
@@ -65,4 +65,4 @@ root 环境额外运行实际 UID65534 的安全演练，不创建系统用户�
 
 旧独立 xszs、keyed SQLite 和 composite backup 命令依赖预基线硬配置文件名和已不匹配的结构，已删除。稳定数据版本数字低于软件版是正常的；删除依据是当前合同不匹配。升级必需的完整快照、维护锁、中断恢复和业务就绪保护仍包含在统一 apply/inspect/recover 中。
 
-xscs 0.15.0 → 0.16.0 的唯一会话变化按[离线观察缓存准备](xscs-protocol-preparation.md)执行。该入口以实际服务属主运行，保留原组备份和写入意图，任何不确定状态均保持停服，不能使用普通 `recover-upgrade` 处理此专用准备记录。
+旧版本专用准备入口、旧结构夹具及相关操作说明已删除；当前升级仍严格验证完整备份、状态合同和业务就绪。

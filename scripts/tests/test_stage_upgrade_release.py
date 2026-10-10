@@ -146,7 +146,7 @@ class ReleaseStagingTests(unittest.TestCase):
         artifact = json.loads(Path(result['manifest']).read_bytes())['artifact']
         entries = stage.artifact_inventory(root, 1024 ** 4)
         self.assertEqual(artifact['tree_sha256'], hashlib.sha256(
-            b'xcss-immutable-release-root-v1\n' + json.dumps(entries, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest())
+            b'immutable-release-root-v1\n' + json.dumps(entries, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest())
         self.assertEqual(next(entry['mode'] for entry in entries if entry['path'] == 'web/index.html'), 0o644)
         (root / 'web/index.html').write_text('changed bundled web')
         changed = stage.artifact_contract(json.loads(self.definition.read_bytes()), self.args.binary, root, '2.0.0', 1024 ** 4)

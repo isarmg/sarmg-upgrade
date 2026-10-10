@@ -1,6 +1,6 @@
 # 功能、验证与取舍
 
-`0.4.0` 只支持当前基线到未来同结构发行物。六个 Server 使用统一机制；产品负责普通实际结构/资源诊断，本工具维护签名升级制品与部署定义，xcss 无产品分支。
+`1.0.0` 只支持当前基线到未来同结构发行物。六个 Server 使用统一机制；产品负责普通实际结构/资源诊断，本工具维护签名升级制品与部署定义。
 
 | 功能 | 实现与证据 | 约束 |
 |---|---|---|
@@ -19,12 +19,12 @@
 | 真实就绪 | systemd MainPID/UID/exe hash+正确 service HTTP ready | 端口可连或进程存在不够 |
 | 有界进程 | stdout/stderr 各 1MiB、1–600s、超限 kill+wait | stderr 不进入普通错误 |
 | 有界快照 | 128 资源、128 深度、200万项/资源、1TiB 最大预算 | 精确输入与完整 hash 仍有 I/O 成本 |
-| 统一日志 | xcss LogRecord、安全码和操作 UUID | 不输出内部链或配置秘密 |
+| 统一日志 | xcsc LogRecord、安全码和操作 UUID | 不输出内部链或配置秘密 |
 | 权威支持表 | 六 Server 的 generic upgrade/recovery；库无 runtime | 不登记历史 source 或推断数据版本 |
 
-## xcss 边界
+## 客户端公共能力
 
-共享 contracts/state-file/fs-safety/log 固定官方 URL、精确 0.10.8 与 full revision。xcss 提供中立合同、权限、锁、原子文件和日志，工具实现阶段/恢复/信任与部署策略。产品验证真实 DDL/完整性/业务约束；生产工具没有独立 SQLite 历史 parser。真实产品 tests 才使用 rusqlite 核对完整业务行。
+单个 xcsc 包固定官方 URL、精确 1.0.0 与完整 revision，通过包内 contracts、state_file、fs_safety、log 和 sqlite 模块提供中立合同、权限、锁、原子文件和日志。工具实现阶段、恢复、信任与部署策略；产品普通诊断验证真实结构、完整性和业务约束。实际产品测试使用 SQLx 核对业务行。
 
 ## 已验证与未验证
 

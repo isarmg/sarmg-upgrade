@@ -12,19 +12,16 @@ pub enum Product {
     Xcos,
     Xczs,
     Xocs,
-    #[serde(rename = "xcss")]
-    Xcss,
 }
 
 impl Product {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 6] = [
         Self::Xszs,
         Self::Xsos,
         Self::Xscs,
         Self::Xcos,
         Self::Xczs,
         Self::Xocs,
-        Self::Xcss,
     ];
 
     pub const fn slug(self) -> &'static str {
@@ -35,14 +32,13 @@ impl Product {
             Self::Xcos => "xcos",
             Self::Xczs => "xczs",
             Self::Xocs => "xocs",
-            Self::Xcss => "xcss",
         }
     }
 
     pub const fn contract(self) -> ProductContract {
         ProductContract {
             product: self,
-            has_runtime_state: !matches!(self, Self::Xcss),
+            has_runtime_state: true,
         }
     }
 }
@@ -87,12 +83,9 @@ mod tests {
     }
 
     #[test]
-    fn xcss_is_a_library_and_all_six_servers_have_runtime_state() {
+    fn all_six_managed_servers_have_runtime_state() {
         for product in Product::ALL {
-            assert_eq!(
-                product.contract().has_runtime_state,
-                product != Product::Xcss
-            );
+            assert!(product.contract().has_runtime_state);
         }
     }
 }

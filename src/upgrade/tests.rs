@@ -372,7 +372,7 @@ fn administrator_upgrade_delegates_to_real_service_identity_and_restores_ownersh
     assert!(journal.execution_seal.is_some());
     assert!(control.delegated_probe_complete);
     assert_eq!(
-        fs::metadata(fixture.plan.data_dir.join(".xcss-maintenance.lock"))
+        fs::metadata(fixture.plan.data_dir.join(".state-maintenance.lock"))
             .unwrap()
             .uid(),
         65534
@@ -819,16 +819,16 @@ impl ServiceControl for MockControl {
 #[test]
 fn ready_http_requires_one_matching_product_identity() {
     for (headers, expected) in [
-        ("x-xcss-service: test-product\r\n", true),
-        ("X-Xcss-Service: test-product\r\n", true),
-        ("x-xcss-service: other-product\r\n", false),
+        ("x-service: test-product\r\n", true),
+        ("X-Service: test-product\r\n", true),
+        ("x-service: other-product\r\n", false),
         ("", false),
         (
-            "x-xcss-service: test-product\r\nx-xcss-service: other-product\r\n",
+            "x-service: test-product\r\nx-service: other-product\r\n",
             false,
         ),
         (
-            "x-xcss-service: test-product\r\nx-xcss-service: test-product\r\n",
+            "x-service: test-product\r\nx-service: test-product\r\n",
             false,
         ),
     ] {

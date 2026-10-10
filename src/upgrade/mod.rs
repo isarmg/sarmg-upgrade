@@ -8,7 +8,6 @@ mod process;
 #[cfg(test)]
 mod product_tests;
 mod snapshot;
-pub mod xscs_preparation;
 pub use native_release::{NativeReleasePlan, ReleaseArtifact};
 #[cfg(test)]
 mod tests;
@@ -396,7 +395,7 @@ fn http_ready(address: SocketAddr, service_identity: &str) -> anyhow::Result<boo
     let mut identities = headers
         .lines()
         .filter_map(|line| line.split_once(':'))
-        .filter(|(name, _)| name.eq_ignore_ascii_case("x-xcss-service"))
+        .filter(|(name, _)| name.eq_ignore_ascii_case("x-service"))
         .map(|(_, value)| value.trim());
     if identities.next() != Some(service_identity) || identities.next().is_some() {
         return Ok(false);

@@ -57,10 +57,10 @@
 | `src/upgrade/tests.rs` | 真实机制/故障/权限/中断测试 |
 | `src/upgrade/product_tests.rs` | 真实当前产品 init、校验、run、ready 和恢复 |
 
-xcss 公共库只提供资源/结构合同、锁、安全文件和日志；产品提供业务校验。通用工具不根据产品名写特殊迁移，不注入 shell hooks，不向 xcss 添加产品分支。
+xcsc 内部模块提供中立合同、锁、安全文件和日志；产品普通诊断负责业务校验。工具拥有签名、备份、切换与恢复流程，不注入 shell hooks。
 
 ## CLI 输出
 
-`apply-upgrade` 和 `recover-upgrade` 成功输出阶段与 journal。失败返回稳定错误码及恢复目录，不反射子进程 stderr 或内部 error chain。`inspect-upgrade` 检查完成备份、现行程序与原始快照关系、门和 Root，不把无法读取解释为安全未修改。结构化日志通过唯一 xcss 实现记录 `xssc.phase_changed` 和操作 UUID。
+`apply-upgrade` 和 `recover-upgrade` 成功输出阶段与 journal。失败返回稳定错误码及恢复目录，不反射子进程 stderr 或内部 error chain。`inspect-upgrade` 检查完成备份、现行程序与原始快照关系、门和 Root，不把无法读取解释为安全未修改。结构化日志通过 xcsc::log记录 `xssc.phase_changed` 和操作 UUID。
 
 完整字段与操作者步骤见[离线升级与恢复](offline-upgrades.md)。

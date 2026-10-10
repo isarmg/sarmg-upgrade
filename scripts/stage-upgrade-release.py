@@ -137,7 +137,7 @@ def artifact_contract(definition, binary, root, version, max_bytes):
     if layout.name != version or not Path(root).as_posix().endswith("/" + layout.as_posix()) or Path(root) / entrypoint != binary:
         raise ValueError("binary and complete root must preserve the product's exact versioned layout")
     entries = artifact_inventory(root, max_bytes)
-    checksum = hashlib.sha256(b"xcss-immutable-release-root-v1\n" + json.dumps(entries, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+    checksum = hashlib.sha256(b"immutable-release-root-v1\n" + json.dumps(entries, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
     if "tree_sha256" in artifact and artifact["tree_sha256"] != checksum:
         raise ValueError("declared complete release checksum differs")
     return {**artifact, "tree_sha256": checksum}
@@ -145,7 +145,7 @@ def artifact_contract(definition, binary, root, version, max_bytes):
 
 def release_identity(value):
     if not isinstance(value, dict) or set(value) != {"product", "version", "source_revision", "target", "state_contract_sha256"}:
-        raise ValueError("release identity must use the xcss contract")
+        raise ValueError("release identity must use the supported contract")
     for field in ("product", "version", "target"):
         identifier(value[field])
     if value["target"] != "x86_64-unknown-linux-gnu":

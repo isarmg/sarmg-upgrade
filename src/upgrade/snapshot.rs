@@ -13,8 +13,8 @@ pub(super) const PENDING: &str = xcsc::state_file::MAINTENANCE_PENDING_FILE;
 pub(super) const COORDINATOR: &str = ".xssc.lock";
 const RESERVED: [&str; 4] = [
     PENDING,
-    ".xcss-maintenance.lock",
-    ".xcss-instance.lock",
+    ".state-maintenance.lock",
+    ".state-instance.lock",
     COORDINATOR,
 ];
 const MAX_ENTRIES: usize = 2_000_000;

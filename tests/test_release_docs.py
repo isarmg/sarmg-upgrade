@@ -25,10 +25,10 @@ class ReleaseDocumentsTests(unittest.TestCase):
             "[nested][guide]\n\n[guide]: guide/next.md#write-mode\n"
         )
         (source / "docs/offline-upgrades.md").write_text(
-            "# Contract\n## 准备\n[preparation](xscs-protocol-preparation.md)\n"
+            "# Contract\n## 准备\n[deployment](platform-setup.md)\n"
         )
-        (source / "docs/xscs-protocol-preparation.md").write_text(
-            "# Preparation\n[cycle](operations.md)\n"
+        (source / "docs/platform-setup.md").write_text(
+            "# Deployment\n[cycle](operations.md)\n"
             "```md\n[example only](missing-example.md)\n```\n"
             "`[inline example](another-missing.md)`\n"
         )
@@ -39,7 +39,7 @@ class ReleaseDocumentsTests(unittest.TestCase):
         (source / "docs/guide/assets/diagram.txt").write_text("offline diagram\n")
         return source, package
 
-    def test_current_real_package_contains_preparation_and_preserves_reader_links(self):
+    def test_current_real_package_contains_deployment_and_preserves_reader_links(self):
         with tempfile.TemporaryDirectory() as temporary:
             package = Path(temporary) / "package"
             package.mkdir()
@@ -51,7 +51,7 @@ class ReleaseDocumentsTests(unittest.TestCase):
             self.assertLessEqual(required, set(files))
             for name in set(files) - {"README.md", "OFFLINE-UPGRADES.md"}:
                 self.assertEqual((package / name).read_bytes(), (ROOT / name).read_bytes())
-            self.assertIn("cache-write-intent", (package / "docs/xscs-protocol-preparation.md").read_text())
+            self.assertIn("xssc --version", (package / "docs/platform-setup.md").read_text())
             self.assertIn("docs/operations.md", (package / "README.md").read_text())
             self.assertIn("docs/offline-upgrades.md", (package / "OFFLINE-UPGRADES.md").read_text())
             documents.verify(package, "1.0.0")

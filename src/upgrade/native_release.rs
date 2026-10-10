@@ -266,7 +266,7 @@ fn immutable_entries(root: &Path, limit: u64) -> anyhow::Result<Vec<Entry>> {
 /// implements this same byte contract, including the domain separator.
 pub(super) fn tree_digest(entries: &[Entry]) -> anyhow::Result<String> {
     let mut digest = Sha256::new();
-    digest.update(b"xcss-immutable-release-root-v1\n");
+    digest.update(b"immutable-release-root-v1\n");
     digest.update(serde_json::to_vec(entries)?);
     Ok(super::digest_hex(digest.finalize()))
 }
@@ -366,7 +366,7 @@ pub(super) fn coordinate(plan: &UpgradePlan) -> anyhow::Result<Option<Maintenanc
             .current_link
             .parent()
             .unwrap()
-            .join(".xcss-release-upgrade"),
+            .join(".release-upgrade"),
     )?;
     Ok(Some(directory.try_maintenance_lock()?))
 }

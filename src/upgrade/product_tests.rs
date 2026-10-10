@@ -128,7 +128,7 @@ impl ProductFixture {
             )
             .await
             .unwrap();
-            sqlx::raw_sql("INSERT INTO user(id,username,user_type) VALUES(900,'fixture-member',2); INSERT INTO article(id,user_id,sort_id,label_id,article_title,article_content) VALUES(901,1,1,1,'Current fixture title','Current protected fixture content'); INSERT INTO _xcss_security_audit_events(event_id,action,outcome,detail_json,occurred_at_micros) VALUES('fixture-audit','fixture-test','success','{}',10);")
+            sqlx::raw_sql("INSERT INTO user(id,username,user_type) VALUES(900,'fixture-member',2); INSERT INTO article(id,user_id,sort_id,label_id,article_title,article_content) VALUES(901,1,1,1,'Current fixture title','Current protected fixture content'); INSERT INTO _common_security_audit_events(event_id,action,outcome,detail_json,occurred_at_micros) VALUES('fixture-audit','fixture-test','success','{}',10);")
                 .execute(&mut connection).await.unwrap();
             connection.close().await.unwrap();
         });

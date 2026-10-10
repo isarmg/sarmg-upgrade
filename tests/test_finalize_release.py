@@ -53,7 +53,7 @@ class FinalizeReleaseTests(unittest.TestCase):
             if changed_provenance is not None: provenance[changed_provenance] = "wrong"
             (package / "provenance.json").write_text(json.dumps(provenance))
             if changed_file == "document":
-                (package / "docs/xscs-protocol-preparation.md").unlink()
+                (package / "docs/platform-setup.md").unlink()
             elif changed_file == "binary":
                 binary.write_bytes(b"changed binary")
             elif changed_file == "catalog":
@@ -73,7 +73,7 @@ class FinalizeReleaseTests(unittest.TestCase):
                 check=False,
             )
 
-    def test_missing_offline_preparation_document_is_rejected_before_signing(self):
+    def test_missing_deployment_document_is_rejected_before_signing(self):
         result = self.run_finalize(changed_file="document")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("release documentation validation failed", result.stderr)

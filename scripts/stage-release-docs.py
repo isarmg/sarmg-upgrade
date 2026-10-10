@@ -13,7 +13,7 @@ from urllib.parse import unquote, urlsplit
 DOCUMENTS = (
     "docs/operations.md",
     "docs/offline-upgrades.md",
-    "docs/xscs-protocol-preparation.md",
+    "docs/platform-setup.md",
 )
 MAX_FILES = 256
 MAX_FILE_BYTES = 8 * 1024 * 1024
@@ -154,14 +154,14 @@ def entry_documents(version):
             "Linux AMD64 GNU 离线维护工具。先停止全部持久状态 writer，再以独立可信身份验证程序和计划。\n\n"
             "- [操作、恢复和发行条件](docs/operations.md)\n"
             "- [受签名发行物的完整升级合同](docs/offline-upgrades.md)\n"
-            "- [xscs 0.15.0 → 0.16.0 观察缓存准备及中断核验](docs/xscs-protocol-preparation.md)\n\n"
+            "- [Linux 安装、诊断和卸载](docs/platform-setup.md)\n\n"
             "程序为 `bin/xssc`，制品定义助手为 `libexec/stage-upgrade-release.py`。"
             "`SHA256SUMS` 和 `SHA256SUMS.sig` 覆盖程序、文档和其余发行文件；公钥必须从独立可信源码取得。\n"
         ).encode(),
         "OFFLINE-UPGRADES.md": (
             "# 离线升级说明入口\n\n"
             "完整字段、信任和恢复条件见[受签名离线升级合同](docs/offline-upgrades.md)。\n\n"
-            "xscs 本次会话变化见[独立观察缓存准备](docs/xscs-protocol-preparation.md)。\n"
+            "安装、诊断和卸载见[部署指南](docs/platform-setup.md)。\n"
         ).encode(),
     }
 

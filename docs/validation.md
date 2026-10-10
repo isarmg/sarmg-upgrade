@@ -10,7 +10,7 @@
 
 # 0.6.0 当前候选验证
 
-本轮在 macOS 上使用官方 Rust 1.99.0 与固定 xcss 1.0.0 / `d58b9ef0822984ee0d29fb8b8139cfd2787374fb`：`cargo fmt --all -- --check`、官方 `verify-source`、workflow supply-chain 两个工作流与负向策略检查、Linux AMD64 目标 `cargo clippy --locked --all-targets --all-features -- -D warnings` 已通过。交叉编译只验证 Linux 目标静态代码；没有将其当作 Linux 原生锁或业务运行证据。
+本轮在 macOS 上使用官方 Rust 1.99.0 与当时固定公共输入 1.0.0 / `d58b9ef0822984ee0d29fb8b8139cfd2787374fb`：`cargo fmt --all -- --check`、官方 `verify-source`、workflow supply-chain 两个工作流与负向策略检查、Linux AMD64 目标 `cargo clippy --locked --all-targets --all-features -- -D warnings` 已通过。交叉编译只验证 Linux 目标静态代码；没有将其当作 Linux 原生锁或业务运行证据。
 
 新 xscs 离线准备新增六项风险测试，包含精确旧观察形状、真实 SQLite 事务和业务保留、坏结构拒绝、完整备份、源接口/摘要/身份拒绝、common/DB 锁冲突及写入意图记录。它们由现有 Ubuntu CI 的全部 targets/features 测试运行；当前原生结果等待该源码 CI，源接口和停服夹具不代表真实 systemd 或设备。
 
@@ -20,11 +20,11 @@
 
 # 当前离线升级验证
 
-本记录只计入最新范围：操作者先停止当前 Server 和全部数据 writer，辅助工具完成同结构发行物切换及原完整组恢复。历史转换、撤回候选、源码审阅和尚不存在的未来制品不计为通过证据；迁入的旧事实单独封存在 `validation-context.md` / `legacy-location-notes.md`。
+本记录只计入最新范围：操作者先停止当前 Server 和全部数据 writer，辅助工具完成同结构发行物切换及原完整组恢复。历史转换、撤回候选、源码审阅和尚不存在的未来制品不计为通过证据；历史原始输入与日志另存工作区审计备份，不作为当前发行的验收证明。
 
 ## 固定输入
 
-原始机制及真实产品验收使用 Tool `0.4.0`。四个直接 xcss crate 全部固定官方 Git URL、`=0.10.8`、完整 revision `6c6206cf7df047fb8b4c72689fbba6495e2e7968`。Cargo.lock 中102个registry包的名称/版本/source与上一精确锁图逐项相同。Tool自身通过std-only build.rs记录实际编译target及严格40位源码修订，开发态明确unbound；正式stage必须与冻结HEAD一致，finalize在签名前逐项核对实际binary支持/版本及provenance。早期本地校验使用受控缓存解析；随后官方签名发行实际成功，见下节的发行证据。
+原始机制及真实产品验收使用 Tool `0.4.0`。当时四个公共 crate 全部固定官方 Git URL、`=0.10.8`、完整 revision `6c6206cf7df047fb8b4c72689fbba6495e2e7968`。Cargo.lock 中102个registry包的名称/版本/source与上一精确锁图逐项相同。Tool自身通过std-only build.rs记录实际编译target及严格40位源码修订，开发态明确unbound；正式stage必须与冻结HEAD一致，finalize在签名前逐项核对实际binary支持/版本及provenance。早期本地校验使用受控缓存解析；随后官方签名发行实际成功，见下节的发行证据。
 
 ## 已执行的机制验证（2026-10-07）
 
@@ -45,7 +45,7 @@
 | 工具发行identity Python | 3 passed；实际字段/hash/编译source/target/provenance错在打开签名私钥前拒绝 |
 | workflow策略 | 固定action/runner/权限/credentials正向及负向通过 |
 
-完整日志：[Rust机制测试](validation-logs/final-0.10.8-tests.log)、[Clippy](validation-logs/final-0.10.8-clippy.log)、[真实当前Xocs](validation-logs/actual-current-product-tests.log)。
+旧阶段的完整 Rust 日志另存审计备份；仍可查阅 [Clippy](validation-logs/final-0.10.8-clippy.log)、[真实当前Xocs](validation-logs/actual-current-product-tests.log)。
 
 测试使用模拟服务管理器观察及故障注入，同时真正执行签名、文件、权限、锁和恢复。它们不修改系统服务、不创建系统用户，不当作真实systemd验收。
 
@@ -65,12 +65,12 @@
 
 Tool `0.4.0` 官方签名发行 [run 37596210367](https://github.com/isarmg/xssc/actions/runs/37596210367) 实际成功，Source `b15df0a0f83c8135635188bfe0744f322e798952`。官方制品下载后以仓库既有独立 Ed25519 信任锚核签，并验证所有清单/摘要和实际 binary support 的 source/target/version。封存`官方验收收据`记录 archive SHA256 `c62bf726998647f6895657663ca12804842c64849443ff2fd3e0b290c3bb6a63` 与 ELF SHA256 `f3554b9a4364f7e0ea49765d0a074d6d103d875843d648cba46111e845d73210`。本地未签名制品保留且与官方字节身份分开。
 
-`0.4.1` 仅修正声明和发行 CI：旧 `xcss-product.toml` 的 0.10.3 声明漂移到实际唯一 0.10.8，并删未消费的 secret-envelope 能力；新增官方精确策略的 verify-source 必需门。Cargo registry 包和生产业务机制均未改动，先前 Xocs 3.1.2 E2E 保持原 Source 事实，不冒充后来 Xocs 3.1.3 或新 Tool Source 的 E2E。当前来源正向/负向记录见[输入验证](xcsc-input-validation.md)。0.4.1 新正式 Source/CI/资产在成功后另存其版本目录。
+`0.4.1` 仅修正声明和发行 CI：当时产品角色声明中的 0.10.3漂移到实际唯一 0.10.8，并删未消费的 secret-envelope 能力；新增官方精确策略的 verify-source 必需门。Cargo registry 包和生产业务机制均未改动，先前 Xocs 3.1.2 E2E 保持原 Source 事实，不冒充后来 Xocs 3.1.3 或新 Tool Source 的 E2E。当前来源正向/负向记录见[输入验证](xcsc-input-validation.md)。0.4.1 新正式 Source/CI/资产在成功后另存其版本目录。
 
 
 ## 0.4.1 正式发行与最新当前产品实测
 
-`0.4.1` 冻结运行源码为 `ec147584f99edca6e9333298b707066a09778dd3`，annotated tag object 为 `2ced9246552c6b9486439cb2d8a8c855d457d6cc`。主 CI [37605345982](https://github.com/isarmg/xssc/actions/runs/37605345982) 与正式发行 [37606281761](https://github.com/isarmg/xssc/actions/runs/37606281761) 全部成功，必需的官方精确 xcss 输入门实际通过。下载官方资产后，使用冻结源码中的原有 Ed25519 公钥独立核签，逐项核验包内清单及 ELF 实际编译 source/target/version、目录 catalog 与 provenance；未更换信任锚。archive SHA256 为 `139940430ce51579c544bea07e6f016e8c213ed3a36f52d76b269943c5094ba5`，ELF SHA256 为 `da5aa45b3d0567452729b6982d80af745821f02ca9aeeb7ba9eac671dfc1505b`。完整`官方收据`和全部资产封存在本仓库版本目录，0.4.0 旧证据未覆写。
+`0.4.1` 冻结运行源码为 `ec147584f99edca6e9333298b707066a09778dd3`，annotated tag object 为 `2ced9246552c6b9486439cb2d8a8c855d457d6cc`。主 CI [37605345982](https://github.com/isarmg/xssc/actions/runs/37605345982) 与正式发行 [37606281761](https://github.com/isarmg/xssc/actions/runs/37606281761) 全部成功，必需的官方精确公共输入门实际通过。下载官方资产后，使用冻结源码中的原有 Ed25519 公钥独立核签，逐项核验包内清单及 ELF 实际编译 source/target/version、目录 catalog 与 provenance；未更换信任锚。archive SHA256 为 `139940430ce51579c544bea07e6f016e8c213ed3a36f52d76b269943c5094ba5`，ELF SHA256 为 `da5aa45b3d0567452729b6982d80af745821f02ca9aeeb7ba9eac671dfc1505b`。完整`官方收据`和全部资产封存在本仓库版本目录，0.4.0 旧证据未覆写。
 
 同一 0.4.1 运行源码还重新执行了两条实际当前产品 opt-in，**2 passed**。产品使用官方 Xocs `3.1.3` 归档，Source 为 `2d0f2d26e2c95af6cfe44375e0de2befb20f24c0`，ELF SHA256 为 `ab59db6ee4845e834677e1465cfdb6eb47b176dec7537b89bc7778131933e891`。从该版本的当前 init 建立数据，再以实际 UID/GID 65534 验证正常同合同重装的业务 ready、全部业务表/媒体及属主保留，以及目标校验失败后原程序/配置/数据整组恢复与真实 ready。`实测收据`明确记录 Tool 和产品实际 Source，以及受控测试仅替换服务管理器、使用临时夹具签名的边界。它不代表不同未来版本或真实 systemd companion 生命周期已经验收。
 

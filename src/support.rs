@@ -70,9 +70,8 @@ mod tests {
                 .filter(|entry| entry.product == product)
                 .collect::<Vec<_>>();
             assert_eq!(matching.len(), 1);
-            let expected = product != Product::Xcss;
-            assert_eq!(matching[0].signed_release_upgrade, expected);
-            assert_eq!(matching[0].durable_recovery, expected);
+            assert!(matching[0].signed_release_upgrade);
+            assert!(matching[0].durable_recovery);
         }
         assert_eq!(matrix.state_transition, "current-to-future-same-contract");
         assert!(
