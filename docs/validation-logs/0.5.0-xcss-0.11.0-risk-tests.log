@@ -1,10 +1,11 @@
+# 项目名称已规范化，版本、提交、摘要及验收状态保持历史记录，不作为当前验收证据。未经规范化的原始文本仅保存在本次工作区审计备份中；本文件不是逐字原始记录。
     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.31s
      Running unittests src/lib.rs (target/debug/deps/xssc-c45d514c44a256bb)
 
 running 30 tests
-test upgrade::product_tests::actual_current_product_preserves_state_and_becomes_business_ready ... ignored, requires XCSS_TEST_POETIZE_BINARY; actual current product and runtime sockets
-test upgrade::product_tests::actual_current_validation_failure_restores_current_group_and_real_readiness ... ignored, requires XCSS_TEST_POETIZE_BINARY; actual current product and recovery sockets
-test catalog::tests::foundation_is_a_library_and_all_six_servers_have_runtime_state ... ok
+test upgrade::product_tests::actual_current_product_preserves_state_and_becomes_business_ready ... ignored, requires XSSC_TEST_XOCS_BINARY; actual current product and runtime sockets
+test upgrade::product_tests::actual_current_validation_failure_restores_current_group_and_real_readiness ... ignored, requires XSSC_TEST_XOCS_BINARY; actual current product and recovery sockets
+test catalog::tests::xcss_is_a_library_and_all_six_servers_have_runtime_state ... ok
 test catalog::tests::product_names_round_trip ... ok
 test support::tests::support_names_six_servers_and_no_library_runtime ... ok
 test upgrade::tests::complete_release_checksum_or_selector_drift_fails_before_data_mutation ... ok

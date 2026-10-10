@@ -9,7 +9,7 @@ use anyhow::{Context, ensure};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub(super) const PENDING: &str = xcss_state_file::MAINTENANCE_PENDING_FILE;
+pub(super) const PENDING: &str = xcsc::state_file::MAINTENANCE_PENDING_FILE;
 pub(super) const COORDINATOR: &str = ".xssc.lock";
 const RESERVED: [&str; 4] = [
     PENDING,

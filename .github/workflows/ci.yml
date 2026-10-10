@@ -9,7 +9,7 @@ on:
 permissions: {}
 
 jobs:
-  foundation-source:
+  xcsc-source:
     permissions:
       contents: read
     runs-on: ubuntu-24.04
@@ -20,15 +20,15 @@ jobs:
         with:
           path: product
           persist-credentials: false
-      - name: Check out the exact official Foundation source
+      - name: Check out the exact official xcsc source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          repository: isarmg/xcss
-          ref: d58b9ef0822984ee0d29fb8b8139cfd2787374fb
-          path: foundation-policy
+          repository: isarmg/xcsc
+          ref: 00770c007912b276f5bb1075abfefe3c31026276
+          path: xcsc-policy
           persist-credentials: false
       - name: Verify manifest, immutable dependencies and exact lock source
-        run: python3 foundation-policy/scripts/xcss-conformance.py verify-source --product-root product
+        run: python3 xcsc-policy/scripts/check-xcsc.py --product-root product
 
   quality:
     permissions:

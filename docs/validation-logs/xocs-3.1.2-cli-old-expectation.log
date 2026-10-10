@@ -1,3 +1,4 @@
+# 项目名称已规范化，版本、提交、摘要及验收状态保持历史记录，不作为当前验收证据。未经规范化的原始文本仅保存在本次工作区审计备份中；本文件不是逐字原始记录。
 help/version leave current directory unchanged: passed
 bad administrator password leaves target absent: passed
 unknown data refuses initialization/run and retains original bytes: passed
@@ -7,7 +8,7 @@ bad file/environment values cannot be hidden by a valid CLI override: passed
 validation reads WAL-only credential changes without modifying main/WAL/SHM: passed
 status rejects a real ready endpoint owned by another service: passed
 Traceback (most recent call last):
-  File "/tmp/poetize-cli-acceptance.py", line 187, in <module>
+  File "/tmp/xocs-cli-acceptance.py", line 187, in <module>
     assert failure["code"] == "state.upgrade_pending"
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 AssertionError

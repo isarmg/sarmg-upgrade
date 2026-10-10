@@ -13,8 +13,8 @@ struct Cli {
 /// Upgrade current managed releases and recover the complete protected group.
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Back up Sunshine 0.15.0 and invalidate only its v3 observation cache offline.
-    PrepareSunshineProtocol {
+    /// Back up xscs 0.15.0 and invalidate only its v3 observation cache offline.
+    PrepareXscsProtocol {
         #[arg(long)]
         plan: PathBuf,
     },
@@ -64,8 +64,8 @@ fn main() -> std::process::ExitCode {
 
 fn run() -> anyhow::Result<()> {
     match Cli::parse().command {
-        Command::PrepareSunshineProtocol { plan } => {
-            let result = xssc::upgrade::sunshine_preparation::prepare_from_file(&plan)?;
+        Command::PrepareXscsProtocol { plan } => {
+            let result = xssc::upgrade::xscs_preparation::prepare_from_file(&plan)?;
             println!("{}", serde_json::to_string_pretty(&result)?);
             Ok(())
         }

@@ -74,7 +74,7 @@ fn rows(path: &Path) -> Vec<(String, Vec<Vec<String>>)> {
 impl ProductFixture {
     fn new() -> Self {
         let executable = PathBuf::from(
-            std::env::var_os("XCSS_TEST_POETIZE_BINARY")
+            std::env::var_os("XSSC_TEST_XOCS_BINARY")
                 .expect("supply the actual current Xocs executable"),
         );
         let root =
@@ -182,7 +182,7 @@ impl ProductFixture {
         .unwrap();
         let plan = UpgradePlan {
             plan_version: 1,
-            service: "poetize-current-fixture.service".into(),
+            service: "xocs-current-fixture.service".into(),
             additional_services: Vec::new(),
             installed_binary: installed,
             target_binary: target,
@@ -390,7 +390,7 @@ impl ServiceControl for ProductControl {
     }
 }
 #[test]
-#[ignore = "requires XCSS_TEST_POETIZE_BINARY; actual current product and runtime sockets"]
+#[ignore = "requires XSSC_TEST_XOCS_BINARY; actual current product and runtime sockets"]
 fn actual_current_product_preserves_state_and_becomes_business_ready() {
     let fixture = ProductFixture::new();
     let mut control = ProductControl::default();
@@ -417,7 +417,7 @@ fn actual_current_product_preserves_state_and_becomes_business_ready() {
     }
 }
 #[test]
-#[ignore = "requires XCSS_TEST_POETIZE_BINARY; actual current product and recovery sockets"]
+#[ignore = "requires XSSC_TEST_XOCS_BINARY; actual current product and recovery sockets"]
 fn actual_current_validation_failure_restores_current_group_and_real_readiness() {
     let fixture = ProductFixture::new();
     let original_config = fs::read(&fixture.plan.config).unwrap();

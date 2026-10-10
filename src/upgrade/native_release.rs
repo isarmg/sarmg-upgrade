@@ -9,7 +9,7 @@ use std::{
     os::unix::fs::{MetadataExt, PermissionsExt, symlink},
     path::{Component, Path, PathBuf},
 };
-use xcss_state_file::{MaintenanceLock, PrivateStateDirectory};
+use xcsc::state_file::{MaintenanceLock, PrivateStateDirectory};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]

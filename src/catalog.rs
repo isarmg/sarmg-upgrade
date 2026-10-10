@@ -87,7 +87,7 @@ mod tests {
     }
 
     #[test]
-    fn foundation_is_a_library_and_all_six_servers_have_runtime_state() {
+    fn xcss_is_a_library_and_all_six_servers_have_runtime_state() {
         for product in Product::ALL {
             assert_eq!(
                 product.contract().has_runtime_state,

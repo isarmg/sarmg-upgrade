@@ -1,6 +1,6 @@
 {
   "date_utc": "2026-10-07T08:15:57.069680+00:00",
-  "scope": "current tracked product text files; immutable history/archive bytes not rewritten",
+  "scope": "Historical tracked-product source scan; project names normalized; historical versions, revisions and results retained, not current acceptance",
   "patterns": [
     "tool name",
     "dedicated deployment API",
@@ -77,5 +77,6 @@
       "runtime_source_revision": "0b7a30f4444807a5fc8535f4b843c5ac0f12add3",
       "references": []
     }
-  ]
+  ],
+  "_project_name_normalization": "项目名称已规范化，版本、提交、摘要及验收状态保持历史记录，不作为当前验收证据。未经规范化的原始文本仅保存在本次工作区审计备份中；本文件不是逐字原始记录。"
 }

@@ -145,7 +145,7 @@ def artifact_contract(definition, binary, root, version, max_bytes):
 
 def release_identity(value):
     if not isinstance(value, dict) or set(value) != {"product", "version", "source_revision", "target", "state_contract_sha256"}:
-        raise ValueError("release identity must use the Foundation contract")
+        raise ValueError("release identity must use the xcss contract")
     for field in ("product", "version", "target"):
         identifier(value[field])
     if value["target"] != "x86_64-unknown-linux-gnu":

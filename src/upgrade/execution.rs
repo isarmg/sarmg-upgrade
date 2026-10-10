@@ -7,7 +7,7 @@ use std::{
     os::unix::fs::{MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
 };
-use xcss_state_file::PrivateStateDirectory;
+use xcsc::state_file::PrivateStateDirectory;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

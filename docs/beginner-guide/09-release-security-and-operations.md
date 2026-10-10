@@ -1,6 +1,6 @@
 # 9. 发行信任与操作
 
-依赖、源码 full revision、软件版、target 和状态合同共同绑定发行身份。Cargo 使用官方 URL/full rev/exact version 与根 lockfile。工具四个直接 Foundation crates 固定 0.10.8；仅工具使用行政权限桥，服务普通严格属主行为保持不变。
+依赖、源码 full revision、软件版、target 和状态合同共同绑定发行身份。Cargo 使用官方 URL/full rev/exact version 与根 lockfile。工具只依赖 xcsc 单体 1.0.0，启用 offline-maintenance feature；通过客户端公共文件能力读取服务器状态，服务自身的严格属主校验保持不变。
 
 发布者用 `stage-upgrade-release.py` 对真实目标、产品定义、独立受信任公钥和受控私钥制作离线签名包。manifest 的精确字节签名，ELF与完整树 hash在签名范围内。接收者从独立渠道固定公钥 DER 指纹。
 

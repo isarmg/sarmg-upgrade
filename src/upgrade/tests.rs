@@ -1,6 +1,52 @@
 use super::*;
 use std::os::unix::fs::PermissionsExt;
 
+#[test]
+fn coordinator_drop_unlocks_an_aliased_description_without_removing_its_inode() {
+    use std::os::unix::fs::MetadataExt;
+    let temporary = tempfile::tempdir().unwrap();
+    let data = temporary.path().join("data");
+    snapshot::private_directory(&data).unwrap();
+    let lock = coordinator_lock(&data).unwrap();
+    let alias = lock.file.file().try_clone().unwrap();
+    let path = data.join(snapshot::COORDINATOR);
+    let identity = fs::metadata(&path).unwrap().ino();
+    assert!(coordinator_lock(&data).is_err());
+    // Failed acquisition must not unlock the current owner.
+    assert!(coordinator_lock(&data).is_err());
+    drop(lock);
+    let next = coordinator_lock(&data).unwrap();
+    assert_eq!(fs::metadata(&path).unwrap().ino(), identity);
+    assert_eq!(fs::metadata(&path).unwrap().mode() & 0o777, 0o600);
+    // Closing an alias to the previous description must not unlock this owner.
+    drop(alias);
+    assert!(coordinator_lock(&data).is_err());
+    drop(next);
+    assert!(coordinator_lock(&data).is_ok());
+}
+
+#[test]
+fn state_lock_verification_failure_unlocks_only_the_original_description() {
+    let temporary = tempfile::tempdir().unwrap();
+    let data = temporary.path().join("data");
+    snapshot::private_directory(&data).unwrap();
+    let directory = PrivateStateDirectory::open(&data).unwrap();
+    let file = directory.create_file(snapshot::COORDINATOR).unwrap();
+    let alias = file.file().try_clone().unwrap();
+    let original = data.join("original-coordinator");
+    fs::rename(data.join(snapshot::COORDINATOR), &original).unwrap();
+    directory.create_file(snapshot::COORDINATOR).unwrap();
+    assert!(StateLock::acquire(file).is_err());
+    let separately_opened = fs::File::open(original).unwrap();
+    rustix::fs::flock(
+        &separately_opened,
+        rustix::fs::FlockOperation::NonBlockingLockExclusive,
+    )
+    .unwrap();
+    assert!(coordinator_lock(&data).is_ok());
+    drop(alias);
+}
+
 struct Fixture {
     _directory: tempfile::TempDir,
     plan: UpgradePlan,

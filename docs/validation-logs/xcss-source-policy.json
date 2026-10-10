@@ -1,6 +1,6 @@
 {
-  "foundation_version": "0.10.8",
-  "foundation_revision": "6c6206cf7df047fb8b4c72689fbba6495e2e7968",
+  "xcss_version": "0.10.8",
+  "xcss_revision": "6c6206cf7df047fb8b4c72689fbba6495e2e7968",
   "official_release_url": "https://github.com/isarmg/xcss/releases/tag/v0.10.8",
   "current_tool_source_verified": true,
   "checks": [
@@ -21,5 +21,6 @@
     "Cargo.lock": "6c810cd0f69e372a92b741f2e938bbd7913c7e1e8dffa5afcc1962573ccb78a7",
     "xcss-product.toml": "007a060344def5991f5c52c354cdd474e38cba572b11eee8b55724d2ae8031c5"
   },
-  "scope": "Metadata and CI gate only; runtime, signed artifacts, prior tags and evidence unchanged."
+  "scope": "Metadata and CI gate only; runtime, signed artifacts, prior tags and evidence unchanged.",
+  "_project_name_normalization": "项目名称已规范化，版本、提交、摘要及验收状态保持历史记录，不作为当前验收证据。未经规范化的原始文本仅保存在本次工作区审计备份中；本文件不是逐字原始记录。"
 }

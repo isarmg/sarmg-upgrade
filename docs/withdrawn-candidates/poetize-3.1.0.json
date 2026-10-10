@@ -1,9 +1,0 @@
-{
-  "version": "3.1.0",
-  "source_revision": "61fe129eccdcea7d14913c5eae921295338402e0",
-  "status": "withdrawn-local-candidate",
-  "reason": "用户缩减升级范围为当前版本到未来版本，后续3.1.1移除当前基线以前的历史迁移CLI、转换模块与历史DDL输入。",
-  "retagged": false,
-  "published": false,
-  "binary_sha256": "5b7195ad559350496a20057acb9976fbffa8435861b629e5f2fc51edabe75257"
-}

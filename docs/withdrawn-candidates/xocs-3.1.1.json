@@ -4,5 +4,6 @@
   "status": "withdrawn-not-published",
   "binary_sha256": "60f790501d8dc0cc75bcf0185d2afd21dfc2b309c295b8423ed5fd5933555dec",
   "reason": "用户要求独立停服后辅助升级工具；本地下一候选移除产品内工具专用命令、文档和路径约定，公共维护协议改为中性命名。",
-  "retagged": false
+  "retagged": false,
+  "_project_name_normalization": "项目名称已规范化，版本、提交、摘要及验收状态保持历史记录，不作为当前验收证据。未经规范化的原始文本仅保存在本次工作区审计备份中；本文件不是逐字原始记录。"
 }

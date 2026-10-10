@@ -1,6 +1,8 @@
 # 操作、演练与发行
 
-使用 `support --json` 与 `--help` 确认当前构建能力。`1.0.0` 支持六个当前 Server 到未来同结构发行物的统一升级；Foundation 无服务状态。产品校验声明全部保护资源，发行签名绑定精确目标，软件和数据版本分别验证。
+工具仅在 Linux x86_64 GNU 运行，没有账户配对或常驻服务。首次安装、发行包验签、命令路径检查和工具卸载见[部署指南](platform-setup.md)；本页关注被维护的 Server 事务与恢复。
+
+使用 `support --json` 与 `--help` 确认当前构建能力。`1.0.0` 支持六个当前 Server 到未来同结构发行物的统一升级；xcss 无服务状态。产品校验声明全部保护资源，发行签名绑定精确目标，软件和数据版本分别验证。
 
 ## 操作步骤
 
@@ -14,7 +16,9 @@
 ## 故障处理
 
 ```sh
+# 只读检查事务阶段、已完成备份、实际安装程序及维护门状态。
 xssc inspect-upgrade --work-directory /absolute/private/recovery
+# 条件满足时恢复原程序、配置及数据，并验证原服务业务就绪。
 xssc recover-upgrade --work-directory /absolute/private/recovery
 ```
 
@@ -29,12 +33,19 @@ xssc recover-upgrade --work-directory /absolute/private/recovery
 在私有临时实例验证成功切换、启动失败、验证器写入、Root 资产损坏、恢复中断和启动后新写入保护。机制测试使用真实签名/复制/锁；产品测试运行真实当前 init/validate/run/ready，仅替换 systemd 生命周期。
 
 ```sh
+# 检查 Rust 格式，不改源码。
 cargo fmt --all -- --check
+# 使用锁定依赖图运行全部目标/特性的严格静态检查。
 cargo clippy --locked --all-targets --all-features -- -D warnings
+# 执行 Rust 机制和产品集成测试。
 cargo test --locked --all-targets --all-features
+# 执行受签名升级制品制作脚本的 Python 测试。
 python3 -m unittest discover -s scripts/tests -v
+# 验证发行定稿的身份、签名与回解包流程。
 python3 tests/test_finalize_release.py
+# 验证离线发行文档引用闭包及锚点。
 python3 tests/test_release_docs.py
+# 检查工作流的权限、不可变来源和供应链约束。
 python3 scripts/check-workflow-supply-chain.py
 ```
 
@@ -44,14 +55,14 @@ root 环境额外运行实际 UID65534 的安全演练，不创建系统用户�
 
 只生成唯一 Linux AMD64 GNU 制品。`scripts/stage-release.sh` 要求源码 clean、对应 annotated 软件 tag，将完整当前HEAD作为严格编译输入，进行 locked release 构建并打包 binary、真实 support JSON、文档和源码绑定公钥。`scripts/finalize-release.sh` 核对事件 revision/version、binary/catalog hash 与签名公钥，还在打开签名私钥前实际执行有界 binary support/version，逐项复核编译source/target、catalog与provenance，再签名和解包自验证。
 
-离线包根说明入口链接到 `docs/` 的原始相对结构；`scripts/stage-release-docs.py` 从运维、完整升级合同和 Sunshine 准备说明递归封装相对引用，检查本地锚点、越界/链接输入及既有文件覆盖。签名前和解包后再次验证实际文件，缺少准备说明或任一后续引用时拒绝签名。全部封装文档由同一 `SHA256SUMS` 和签名覆盖。
+离线包根说明入口链接到 `docs/` 的原始相对结构；`scripts/stage-release-docs.py` 从运维、完整升级合同和 xscs 准备说明递归封装相对引用，检查本地锚点、越界/链接输入及既有文件覆盖。签名前和解包后再次验证实际文件，缺少准备说明或任一后续引用时拒绝签名。全部封装文档由同一 `SHA256SUMS` 和签名覆盖。
 
-工具依赖 Foundation `=0.11.7` 完整 revision `d58b9ef0822984ee0d29fb8b8139cfd2787374fb`；产品 runtime 的普通属主规则保持严格。五个直接依赖为 contracts/state-file/fs-safety/log/sqlite，官方 URL 与 Cargo.lock 精确绑定，不使用邻仓 path 或远端自动 fallback。
+工具只依赖一个 `xcsc =1.0.0` 包，显式启用 `offline-maintenance`；完整 revision、官方 URL 与 `Cargo.lock` 精确绑定，不使用邻仓 path 或远端自动 fallback。`contracts`、`state_file`、`fs_safety`、`log`、`sqlite` 是该 Client 包内的模块。被维护的 Server 继续使用自身 `xcss` runtime 的严格属主规则。
 
-本地冻结、受控缓存/离线构建、正式远端 CI 和公开发行分别记录。每次正式发行都独立核验其完整源码、CI 和回下载资产，不以本地缓存解析代替远端可获取证明。0.6.0 已公开的 tag 和资产保持原样；文档闭包修复由 1.0.0 新发行承载。
+本地冻结、受控缓存/离线构建、正式远端 CI 和公开发行分别记录。每次正式发行都独立核验其完整源码、CI 和回下载资产，不以本地缓存解析代替远端可获取证明。当前唯一发布标签为 `v1.0.0`；历史验收记录用于追溯，不作为当前发行制品的说明。
 
 ## 删除的预基线入口
 
-旧独立 Media、keyed SQLite 和 composite backup 命令依赖预基线硬配置文件名和已不匹配的结构，已删除。稳定数据版本数字低于软件版是正常的；删除依据是当前合同不匹配。升级必需的完整快照、维护锁、中断恢复和业务就绪保护仍包含在统一 apply/inspect/recover 中。
+旧独立 xszs、keyed SQLite 和 composite backup 命令依赖预基线硬配置文件名和已不匹配的结构，已删除。稳定数据版本数字低于软件版是正常的；删除依据是当前合同不匹配。升级必需的完整快照、维护锁、中断恢复和业务就绪保护仍包含在统一 apply/inspect/recover 中。
 
-Sunshine 0.15.0 → 0.16.0 的唯一会话变化按[离线观察缓存准备](sunshine-protocol-preparation.md)执行。该入口以实际服务属主运行，保留原组备份和写入意图，任何不确定状态均保持停服，不能使用普通 `recover-upgrade` 处理此专用准备记录。
+xscs 0.15.0 → 0.16.0 的唯一会话变化按[离线观察缓存准备](xscs-protocol-preparation.md)执行。该入口以实际服务属主运行，保留原组备份和写入意图，任何不确定状态均保持停服，不能使用普通 `recover-upgrade` 处理此专用准备记录。

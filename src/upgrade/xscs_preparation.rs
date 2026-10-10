@@ -1,4 +1,6 @@
-//! One explicit offline transition for a rebuildable Sunshine observation cache.
+//! One explicit offline transition for a rebuildable xscs observation cache.
+//! Historical source versions keep their original numbers but use the canonical
+//! xscs project identity. Former project names and protocol prefixes are rejected.
 //!
 //! This is not a runtime compatibility reader or a general SQL migration hook.
 //! Credentials, snapshots, tasks, operation fingerprints and audit rows stay intact.
@@ -15,18 +17,18 @@ use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use sqlx::{Connection, Row, SqliteConnection, sqlite::SqliteConnectOptions};
 use uuid::Uuid;
-use xcss_contracts::{ReleaseIdentity, SchemaIdentity};
-use xcss_state_file::PrivateStateDirectory;
+use xcsc::contracts::{ReleaseIdentity, SchemaIdentity};
+use xcsc::state_file::PrivateStateDirectory;
 
 use super::{
-    MAX_JSON, UpgradeFailure, failure, parse_validated_state, process, snapshot,
+    MAX_JSON, StateLock, UpgradeFailure, failure, parse_validated_state, process, snapshot,
     stopped_service_report, validate_digest, validate_service,
 };
 
 const PRODUCT: &str = "xscs";
 const SOURCE_VERSION: &str = "0.15.0";
 const TARGET_VERSION: &str = "0.16.0";
-const REPORT: &str = "sunshine-preparation.json";
+const REPORT: &str = "xscs-preparation.json";
 const SCHEMA_SHA: &str = "0466872562dde0c06ef73e42e683801c21cc1d7be3488ca332a5e9a3d9c0518b";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -76,31 +78,31 @@ impl PreparationStage {
     fn public_failure(self, work: Option<&Path>) -> UpgradeFailure {
         let (code, message) = match self {
             Self::Plan => (
-                "SUNSHINE_PLAN_INVALID",
+                "XSCS_PLAN_INVALID",
                 "准备计划不符合唯一受支持的源版本、路径、权限或备份预算；尚未开始缓存写入。",
             ),
             Self::Owner => (
-                "SUNSHINE_OWNER_INVALID",
+                "XSCS_OWNER_INVALID",
                 "须以实际数据属主和服务组运行，且私有状态目录完整有效；尚未开始缓存写入。",
             ),
             Self::Source => (
-                "SUNSHINE_SOURCE_INVALID",
+                "XSCS_SOURCE_INVALID",
                 "源程序摘要、实际发行身份、当前数据身份或持久资源范围不符；尚未开始缓存写入。",
             ),
             Self::Writers => (
-                "SUNSHINE_WRITER_NOT_EXCLUDED",
+                "XSCS_WRITER_NOT_EXCLUDED",
                 "服务未确认停止、存在待恢复状态或维护锁已被占用；尚未开始缓存写入。",
             ),
             Self::Backup => (
-                "SUNSHINE_BACKUP_FAILED",
+                "XSCS_BACKUP_FAILED",
                 "完整备份、原组一致性或写入前准备记录未确认成功；尚未开始缓存写入，保留工作目录检查。",
             ),
             Self::CacheWrite => (
-                "SUNSHINE_CACHE_STATE_UNCONFIRMED",
+                "XSCS_CACHE_STATE_UNCONFIRMED",
                 "缓存事务或其完成记录未确认；缓存可能已失效。保持停服，按准备记录核验五个观察字段和备份，不能盲目重跑或恢复。",
             ),
             Self::PostCommit => (
-                "SUNSHINE_POSTCOMMIT_FAILED",
+                "XSCS_POSTCOMMIT_FAILED",
                 "缓存事务已提交，但文件身份或完成记录核验失败。保持停服，保留现状及备份，按恢复文档核验，不启动新服务。",
             ),
         };
@@ -149,7 +151,7 @@ fn validate_plan(plan: &PreparationPlan) -> anyhow::Result<()> {
         plan.source_identity.product == PRODUCT
             && plan.source_identity.version == SOURCE_VERSION
             && plan.source_identity.target == "x86_64-unknown-linux-gnu",
-        "this transition accepts only the bound Sunshine 0.15.0 release"
+        "this transition accepts only the bound xscs 0.15.0 release"
     );
     for path in [
         &plan.source_binary,
@@ -187,7 +189,7 @@ fn validate_plan(plan: &PreparationPlan) -> anyhow::Result<()> {
         );
         PathBuf::from(path)
     } else {
-        plan.data_dir.join("sunshine.sqlite3")
+        plan.data_dir.join("xscs.sqlite3")
     };
     ensure!(
         configured_database == plan.database,
@@ -298,13 +300,8 @@ fn prepare_with_stop_check(
         .to_string_lossy();
     let instance = state.create_file(format!(".{name}.xscs.instance.lock"))?;
     let maintenance = state.create_file(format!(".{name}.xscs.maintenance.lock"))?;
-    for file in [&instance, &maintenance] {
-        rustix::fs::flock(
-            file.file(),
-            rustix::fs::FlockOperation::NonBlockingLockExclusive,
-        )?;
-        file.verify_identity()?;
-    }
+    let _instance = StateLock::acquire(instance)?;
+    let _product_maintenance = StateLock::acquire(maintenance)?;
     stopped(plan)?;
     state.verify_identity()?;
     *stage = PreparationStage::Source;
@@ -398,7 +395,7 @@ fn prepare_with_stop_check(
     snapshot::atomic_json(&plan.work_directory.join(REPORT), &report)?;
     *stage = PreparationStage::CacheWrite;
     report.invalidated_devices =
-        xcss_sqlite::block_on_sqlite_connection(invalidate_cache(&plan.database))?;
+        xcsc::sqlite::block_on_sqlite_connection(invalidate_cache(&plan.database))?;
     *stage = PreparationStage::PostCommit;
     report.phase = "cache-invalidated".into();
     snapshot::atomic_json(&plan.work_directory.join(REPORT), &report)?;
@@ -429,11 +426,11 @@ async fn invalidate_cache(path: &Path) -> anyhow::Result<u64> {
         .busy_timeout(Duration::from_secs(5));
     let mut connection = SqliteConnection::connect_with(&options).await?;
     let result = async {
-        xcss_sqlite::apply_connection_limits(&mut connection, xcss_sqlite::ConnectionLimits::new(1024 * 1024)).await?;
-        xcss_sqlite::enable_defensive(&mut connection).await?;
+        xcsc::sqlite::apply_connection_limits(&mut connection, xcsc::sqlite::ConnectionLimits::new(1024 * 1024)).await?;
+        xcsc::sqlite::enable_defensive(&mut connection).await?;
         let deadline = Instant::now() + Duration::from_secs(30);
         connection.lock_handle().await?.set_progress_handler(1000, move || Instant::now() < deadline);
-        xcss_sqlite::require_current_schema(&mut connection, &schema_identity()?).await?;
+        xcsc::sqlite::require_current_schema(&mut connection, &schema_identity()?).await?;
         let mut transaction = connection.begin().await?;
         let mut rows = sqlx::query("SELECT capabilities_json FROM devices WHERE capabilities_json IS NOT NULL LIMIT 10001")
             .fetch(&mut *transaction);
@@ -489,7 +486,7 @@ fn validate_old_capabilities(json: &str) -> anyhow::Result<()> {
     );
     let capabilities: OldCapabilities = serde_json::from_str(json)?;
     ensure!(
-        capabilities.protocol == "sunshine-management/3"
+        capabilities.protocol == "xscs-management/3"
             && !capabilities.client_version.is_empty()
             && capabilities.client_version.len() <= 128
             && matches!(
@@ -502,7 +499,7 @@ fn validate_old_capabilities(json: &str) -> anyhow::Result<()> {
                 .managed_fields
                 .iter()
                 .all(|field| !field.is_empty() && field.len() <= 128),
-        "observation differs from the exact complete Sunshine v3 source contract"
+        "observation differs from the exact complete xscs management v3 source contract"
     );
     Ok(())
 }

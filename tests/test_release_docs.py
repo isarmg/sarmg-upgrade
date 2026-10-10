@@ -25,9 +25,9 @@ class ReleaseDocumentsTests(unittest.TestCase):
             "[nested][guide]\n\n[guide]: guide/next.md#write-mode\n"
         )
         (source / "docs/offline-upgrades.md").write_text(
-            "# Contract\n## 准备\n[preparation](sunshine-protocol-preparation.md)\n"
+            "# Contract\n## 准备\n[preparation](xscs-protocol-preparation.md)\n"
         )
-        (source / "docs/sunshine-protocol-preparation.md").write_text(
+        (source / "docs/xscs-protocol-preparation.md").write_text(
             "# Preparation\n[cycle](operations.md)\n"
             "```md\n[example only](missing-example.md)\n```\n"
             "`[inline example](another-missing.md)`\n"
@@ -44,10 +44,14 @@ class ReleaseDocumentsTests(unittest.TestCase):
             package = Path(temporary) / "package"
             package.mkdir()
             files = documents.stage(ROOT, package, "1.0.0")
-            self.assertEqual(set(files), set(documents.DOCUMENTS) | {"README.md", "OFFLINE-UPGRADES.md"})
-            for name in documents.DOCUMENTS:
+            required = set(documents.DOCUMENTS) | {
+                "README.md", "OFFLINE-UPGRADES.md", "docs/platform-setup.md",
+                "docs/development-contract.md", "docs/common-support.md",
+            }
+            self.assertLessEqual(required, set(files))
+            for name in set(files) - {"README.md", "OFFLINE-UPGRADES.md"}:
                 self.assertEqual((package / name).read_bytes(), (ROOT / name).read_bytes())
-            self.assertIn("cache-write-intent", (package / "docs/sunshine-protocol-preparation.md").read_text())
+            self.assertIn("cache-write-intent", (package / "docs/xscs-protocol-preparation.md").read_text())
             self.assertIn("docs/operations.md", (package / "README.md").read_text())
             self.assertIn("docs/offline-upgrades.md", (package / "OFFLINE-UPGRADES.md").read_text())
             documents.verify(package, "1.0.0")
@@ -60,6 +64,9 @@ class ReleaseDocumentsTests(unittest.TestCase):
             with tarfile.open(archive) as packaged:
                 packaged.extractall(extracted, filter="data")
             self.assertEqual(documents.verify(extracted, "1.0.0"), files)
+            (extracted / "docs/platform-setup.md").unlink()
+            with self.assertRaises(ValueError):
+                documents.verify(extracted, "1.0.0")
 
     def test_nested_documents_references_assets_anchors_and_cycles_are_closed(self):
         with tempfile.TemporaryDirectory() as temporary:

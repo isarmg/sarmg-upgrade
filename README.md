@@ -1,24 +1,32 @@
 # xssc
 
-xssc `1.0.0` 更新到正式发布的 Foundation Server 0.11.7。离线升级事务、恢复日志、签名和信任锚沿用现有合同，操作说明与升级文档继续随发行包提供。改动见[发行说明](docs/releases/1.0.0.md)。
+xssc `1.0.0` 使用单体客户端公共支撑 xcsc `1.0.0`，提供离线升级事务、恢复日志、签名验证和独立信任锚。操作说明与升级文档随发行包提供。改动见[发行说明](docs/releases/1.0.0.md)。
 
-`1.0.0` 修复正式离线包中文档引用不完整的问题：根说明入口指向 `docs/` 中完整的操作、升级合同和 Sunshine 准备说明，封装递归相对引用并核验锚点，签名前及解包后都验证实际闭包。Rust 1.99、SQLx 0.9、Foundation 0.11.7 与 0.6.0 的运行机制继续使用。已公开的旧标签和签名资产保持封存；本补丁须通过实际 CI 后发行。改动见[发行说明](docs/releases/1.0.0.md)。
+离线包根说明入口指向 `docs/` 中完整的操作、升级合同和历史 xscs 准备说明，递归封装相对引用并核验锚点；签名前及解包后都验证实际文档闭包。当前工具链为 Rust 1.99 和 SQLx 0.9，共享客户端基础库版本为 xcsc `1.0.0`。当前唯一发布标签为 `v1.0.0`，历史验收记录仅用于追溯。
 
-签名精确绑定当前与目标软件的发行身份；源和目标必须使用完全相同的真实状态合同。未来实际结构变化随该次发行提供明确转换，本轮另提供唯一的 Sunshine 0.15.0 → 0.16.0 [离线观察缓存准备](docs/sunshine-protocol-preparation.md)，与受签名自动切换流程分开；它只失效可重建观察，保留任务、指纹和业务事实。完整发行 Root 由本工具签名制品定义约束，配置、密钥、数据库及媒体由产品普通只读校验确认；软件版本和稳定数据格式身份分别验证。
+签名精确绑定当前与目标软件的发行身份；源和目标必须使用完全相同的真实状态合同。未来实际结构变化随该次发行提供明确转换，本轮另提供唯一的 xscs 0.15.0 → 0.16.0 [离线观察缓存准备](docs/xscs-protocol-preparation.md)，与受签名自动切换流程分开；它只失效可重建观察，保留任务、指纹和业务事实。完整发行 Root 由本工具签名制品定义约束，配置、密钥、数据库及媒体由产品普通只读校验确认；软件版本和稳定数据格式身份分别验证。
 
 ## 开始使用
 
+正式部署先按[Linux 安装、检查与卸载](docs/platform-setup.md)下载和验证签名，安装已绑定源码身份的发行二进制。xssc 仅在 Linux x86_64 GNU 上运行，无需配对，没有自己的常驻服务。以下是源码开发构建，不能替代正式发行验收：
+
 ```sh
+# 使用锁定依赖图构建本机 Release 模式的开发程序。
 cargo build --release --locked
+# 查看编译目标、源码身份及升级/恢复能力；不执行升级。
 ./target/release/xssc support --json
+# 查看实际升级参数；不改产品状态。
 ./target/release/xssc apply-upgrade --help
 ```
 
 按[离线升级与恢复](docs/offline-upgrades.md)准备受签名制品、独立信任锚和私有升级计划：
 
 ```sh
+# 根据私有计划进行目标验签、备份、切换和业务就绪检查。
 xssc apply-upgrade --plan /absolute/private/plan.json
+# 只读核验本次事务阶段、已完成备份及实际安装身份。
 xssc inspect-upgrade --work-directory /absolute/private/recovery
+# 在完整恢复条件满足后恢复原程序、配置和数据，并验收原服务。
 xssc recover-upgrade --work-directory /absolute/private/recovery
 ```
 
@@ -40,11 +48,12 @@ python3 tests/test_release_docs.py
 python3 scripts/check-workflow-supply-chain.py
 ```
 
-依赖固定官方 Git URL、完整 revision 和精确版本；本地受控缓存验证不等于远端已发布。五个 Foundation 依赖为 `=0.11.7` / `d58b9ef0822984ee0d29fb8b8139cfd2787374fb`，行政权限桥只由工具消费，运行服务使用同一 `0.11.7` 的严格属主入口。
+依赖固定官方 Git URL、完整 revision 和精确版本；本地受控缓存验证不等于远端已发布。只依赖一个 `xcsc =1.0.0` 包，并显式启用 `offline-maintenance`；完整源码 revision 由 `Cargo.toml` 与 `Cargo.lock` 固定。发行身份、状态文件、文件安全、日志及 SQLite 维护是包内模块。运行中的 Server 使用 `xcss` 的严格属主入口，工具通过独立的 Client 实现进行离线维护。
 
 ## 文档
 
 - [文档总览](docs/README.md)
+- [Linux 安装、检查与卸载](docs/platform-setup.md)
 - [初学者指南](docs/beginner-guide/README.md)
 - [项目工作流程](docs/project-workflow.md)
 - [功能与取舍](docs/feature-inventory-and-tradeoffs.md)
@@ -53,3 +62,5 @@ python3 scripts/check-workflow-supply-chain.py
 代码采用 [Apache License 2.0](LICENSE-APACHE)。
 
 当前发布版本：**1.0.0**。参见 [1.0.0 发布说明](docs/releases/1.0.0.md)和[项目命名](docs/naming.md)。
+
+公共支撑的职责、单体依赖、平台边界与验证方法见[公共支撑说明](docs/common-support.md)。

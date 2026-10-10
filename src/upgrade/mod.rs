@@ -8,7 +8,7 @@ mod process;
 #[cfg(test)]
 mod product_tests;
 mod snapshot;
-pub mod sunshine_preparation;
+pub mod xscs_preparation;
 pub use native_release::{NativeReleasePlan, ReleaseArtifact};
 #[cfg(test)]
 mod tests;
@@ -30,8 +30,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use snapshot::{Entry, PENDING};
 use uuid::Uuid;
-use xcss_contracts::{ReleaseIdentity, SchemaIdentity};
-use xcss_state_file::PrivateStateDirectory;
+use xcsc::contracts::{ReleaseIdentity, SchemaIdentity};
+use xcsc::state_file::PrivateStateDirectory;
 
 const JOURNAL: &str = "upgrade.json";
 const MAX_JSON: u64 = 1024 * 1024;
@@ -940,15 +940,33 @@ pub fn apply(
     Ok(journal)
 }
 
-fn coordinator_lock(data_dir: &Path) -> anyhow::Result<xcss_state_file::SecureStateFile> {
+struct StateLock {
+    file: xcsc::state_file::SecureStateFile,
+}
+
+impl StateLock {
+    fn acquire(file: xcsc::state_file::SecureStateFile) -> anyhow::Result<Self> {
+        rustix::fs::flock(
+            file.file(),
+            rustix::fs::FlockOperation::NonBlockingLockExclusive,
+        )?;
+        let guard = Self { file };
+        guard.file.verify_identity()?;
+        Ok(guard)
+    }
+}
+
+impl Drop for StateLock {
+    fn drop(&mut self) {
+        // Unlock the description we acquired even if another process briefly
+        // inherited a descriptor before exec. Keep the persistent lock inode.
+        let _ = rustix::fs::flock(self.file.file(), rustix::fs::FlockOperation::Unlock);
+    }
+}
+
+fn coordinator_lock(data_dir: &Path) -> anyhow::Result<StateLock> {
     let directory = PrivateStateDirectory::open_for_administration(data_dir)?;
-    let file = directory.create_file(snapshot::COORDINATOR)?;
-    rustix::fs::flock(
-        file.file(),
-        rustix::fs::FlockOperation::NonBlockingLockExclusive,
-    )?;
-    file.verify_identity()?;
-    Ok(file)
+    StateLock::acquire(directory.create_file(snapshot::COORDINATOR)?)
 }
 
 fn apply_inner(
@@ -1171,12 +1189,12 @@ fn save(journal: &UpgradeJournal) -> anyhow::Result<()> {
 fn transition(journal: &mut UpgradeJournal, phase: UpgradePhase) -> anyhow::Result<()> {
     journal.phase = phase;
     save(journal)?;
-    xcss_log::LogRecord::server(
+    xcsc::log::LogRecord::client(
         "xssc",
         "maintenance",
         "xssc.phase_changed",
         "Upgrade phase changed.",
-        xcss_log::Level::Info,
+        xcsc::log::Level::Info,
     )?
     .with_task_id(&journal.operation_id.to_string())?
     .with_attribute("phase", serde_json::to_value(phase)?)?
@@ -1201,10 +1219,10 @@ fn gate(journal: &UpgradeJournal) -> anyhow::Result<()> {
         );
     }
     let directory =
-        xcss_fs_safety::PrivateDirectory::open_for_administration(&journal.plan.data_dir)?;
-    xcss_fs_safety::AtomicFile::replace(
+        xcsc::fs_safety::PrivateDirectory::open_for_administration(&journal.plan.data_dir)?;
+    xcsc::fs_safety::AtomicFile::replace(
         &directory,
-        &xcss_fs_safety::RelativePath::new(PENDING)?,
+        &xcsc::fs_safety::RelativePath::new(PENDING)?,
         &serde_json::to_vec(&serde_json::json!({
             "journal_version": 1, "operation_id": journal.operation_id,
             "work_directory": journal.plan.work_directory, "phase": journal.phase,
@@ -1225,8 +1243,8 @@ fn clear_gate(journal: &UpgradeJournal) -> anyhow::Result<()> {
         value.get("operation_id") == Some(&serde_json::to_value(journal.operation_id)?),
         "pending gate ownership differs"
     );
-    xcss_fs_safety::PrivateDirectory::open_for_administration(&journal.plan.data_dir)?
-        .remove_file(&xcss_fs_safety::EntryName::new(PENDING)?)?;
+    xcsc::fs_safety::PrivateDirectory::open_for_administration(&journal.plan.data_dir)?
+        .remove_file(&xcsc::fs_safety::EntryName::new(PENDING)?)?;
     Ok(())
 }
 

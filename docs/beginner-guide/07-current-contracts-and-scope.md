@@ -2,13 +2,13 @@
 
 | 产品 | 统一发行物升级与整组恢复 | 当前状态权威 |
 |---|---|---|
-| Host | 支持 generic 同合同流程 | 当前产品 config validate |
-| Media | 支持 generic 同合同流程 | 当前产品 config validate |
-| Sunshine | 支持 generic 同合同流程 | 当前产品 config validate |
-| Sentinel | 支持 generic 同合同流程 | 当前产品 config validate |
+| xsos | 支持 generic 同合同流程 | 当前产品 config validate |
+| xszs | 支持 generic 同合同流程 | 当前产品 config validate |
+| xscs | 支持 generic 同合同流程 | 当前产品 config validate |
+| xcos | 支持 generic 同合同流程 | 当前产品 config validate |
 | Xczs | 支持 generic 同合同流程 | 当前产品 config validate |
 | Xocs | 支持 generic 同合同流程 | 当前产品 config validate |
-| Foundation | 公共库，无服务升级 | 受控构建依赖 |
+| xcss | 公共库，无服务升级 | 受控构建依赖 |
 
 仅当前基线到未来版本。相同结构先校验再切换；实际未来结构改变随对应发行增加明确实现。本轮不解析缺可信身份的数据、不登记历史软件版本转换、不构造虚拟未来 schema。
 

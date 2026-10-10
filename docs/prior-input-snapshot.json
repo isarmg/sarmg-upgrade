@@ -1,12 +1,12 @@
 {
   "scope": "Transferred prior input snapshot; not final current acceptance",
-  "foundation_administration_revision": "2e46ac5c7660db30fbf6b89a1922fb9ce7fe8fc4",
+  "xcss_administration_revision": "2e46ac5c7660db30fbf6b89a1922fb9ce7fe8fc4",
   "repos": [
     {
       "repo": "xssc",
       "head": "27ad9f303dd72f9287283a423108e93f615f8f52",
       "dirty": true,
-      "foundation_manifest_dependencies": 7,
+      "xcss_manifest_dependencies": 7,
       "locked_sources": {
         "git+https://github.com/isarmg/xcss.git?rev=2e46ac5c7660db30fbf6b89a1922fb9ce7fe8fc4#2e46ac5c7660db30fbf6b89a1922fb9ce7fe8fc4": [
           "0.10.7"
@@ -15,5 +15,6 @@
       "npm_locked_packages": 0,
       "errors": []
     }
-  ]
+  ],
+  "_project_name_normalization": "项目名称已规范化，版本、提交、摘要及验收状态保持历史记录，不作为当前验收证据。未经规范化的原始文本仅保存在本次工作区审计备份中；本文件不是逐字原始记录。"
 }

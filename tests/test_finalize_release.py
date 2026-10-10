@@ -53,7 +53,7 @@ class FinalizeReleaseTests(unittest.TestCase):
             if changed_provenance is not None: provenance[changed_provenance] = "wrong"
             (package / "provenance.json").write_text(json.dumps(provenance))
             if changed_file == "document":
-                (package / "docs/sunshine-protocol-preparation.md").unlink()
+                (package / "docs/xscs-protocol-preparation.md").unlink()
             elif changed_file == "binary":
                 binary.write_bytes(b"changed binary")
             elif changed_file == "catalog":
