@@ -4,7 +4,11 @@ use clap::{Parser, Subcommand};
 use xssc::{Product, support_matrix};
 
 #[derive(Debug, Parser)]
-#[command(name = "xssc", version, about)]
+#[command(
+    name = "xssc",
+    version,
+    about = "Verify current releases offline, apply upgrades, and recover the complete program, configuration and persistent data group."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -31,10 +35,12 @@ enum Command {
         #[arg(long)]
         allow_data_loss: bool,
     },
+    /// Show the currently supported products and their upgrade and recovery capabilities.
     Support {
         #[arg(long)]
         json: bool,
     },
+    /// Show each product's current maintenance contract and runtime-state requirements.
     Catalog {
         #[arg(long)]
         json: bool,
@@ -48,7 +54,7 @@ fn main() -> std::process::ExitCode {
             let value = match error.downcast_ref::<xssc::upgrade::UpgradeFailure>() {
                 Some(error) => serde_json::json!({"error": error}),
                 None => {
-                    serde_json::json!({"error": {"code": "MAINTENANCE_FAILED", "message": "离线维护失败；请检查当前操作契约、文件权限和支持范围。"}})
+                    serde_json::json!({"error": {"code": "MAINTENANCE_FAILED", "message": "Offline maintenance failed; check the current operation contract, file permissions and supported scope."}})
                 }
             };
             println!("{value}");

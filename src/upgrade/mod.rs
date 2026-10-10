@@ -189,11 +189,11 @@ pub struct UpgradeFailure {
 
 #[derive(Debug, thiserror::Error)]
 enum StructureFailure {
-    #[error("现有数据结构与签名声明的当前源结构不相符")]
+    #[error("Existing data structure does not match the signed current-source structure")]
     Incompatible,
-    #[error("产品的只读数据结构校验失败或产生了未授权写入")]
+    #[error("Product read-only structure validation failed or produced unauthorized writes")]
     Validation,
-    #[error("产品声明的持久化路径没有完整包含在升级保护范围中")]
+    #[error("Declared persistent paths are not fully included in upgrade protection")]
     ResourceCoverage,
 }
 
@@ -450,7 +450,7 @@ pub fn read_plan(path: &Path) -> Result<UpgradePlan, UpgradeFailure> {
     parsed.map_err(|_| {
         failure(
             "CONTRACT_VIOLATION",
-            "升级计划的结构、路径或权限不符合当前契约。",
+            "The upgrade plan structure, paths or permissions do not satisfy the current contract.",
             None,
         )
     })
@@ -758,7 +758,7 @@ pub fn verify_release(plan: &UpgradePlan) -> Result<UpgradeRelease, UpgradeFailu
     verified.map_err(|_| {
         failure(
             "ARTIFACT_UNTRUSTED",
-            "目标制品签名、信任锚、平台、发行身份或资源定义校验失败。",
+            "Target artifact signature, trust anchor, platform, release identity or resource definition validation failed.",
             Some(&plan.work_directory),
         )
     })
@@ -806,7 +806,7 @@ fn require_stopped(
     if !all_stopped(plan, control).unwrap_or(false) {
         return Err(failure(
             "SERVER_MUST_BE_STOPPED",
-            "服务或相关数据写入者尚未确认停止。请先停止所有声明的实例并关闭其他管理器的自动重启，再运行离线操作；工具不会停服。",
+            "Services or related data writers have not been confirmed stopped. Stop all declared instances and disable automatic restart by other managers before running offline maintenance; this tool does not stop services.",
             Some(&plan.work_directory),
         ));
     }
@@ -821,7 +821,7 @@ pub fn apply(
     if validate_state_transition(&release).is_err() {
         return Err(failure(
             "STATE_INCOMPATIBLE",
-            "此未来发行物改变了状态合同，但尚未提供该版本的明确转换实现；未修改原始状态。",
+            "This future release changes the state contract without providing an explicit conversion for that version; original state was not modified.",
             Some(&plan.work_directory),
         ));
     }
@@ -829,7 +829,7 @@ pub fn apply(
     let original = native_release::installed_binary(plan).map_err(|_| {
         failure(
             "CURRENT_RELEASE_INCOMPATIBLE",
-            "当前程序或完整发行目录身份无法验证；未进入维护。",
+            "The current program or complete release-directory identity could not be verified; maintenance was not entered.",
             None,
         )
     })?;
@@ -838,21 +838,21 @@ pub fn apply(
         .map_err(|_| {
             failure(
                 "CURRENT_RELEASE_INCOMPATIBLE",
-                "当前程序的真实编译发行身份与受签名当前基线不符；未进入维护。",
+                "The current program compiled release identity does not match the signed current baseline; maintenance was not entered.",
                 None,
             )
         })?;
     let _instance_upgrade = coordinator_lock(&plan.data_dir).map_err(|_| {
         failure(
             "MAINTENANCE_BUSY",
-            "另一个升级进程正在维护此数据目录。",
+            "Another upgrade process is maintaining this data directory.",
             Some(&plan.work_directory),
         )
     })?;
     let _release_upgrade = native_release::coordinate(plan).map_err(|_| {
         failure(
             "MAINTENANCE_BUSY",
-            "发行目录正在被另一维护进程使用，或选择器目录不安全。",
+            "The release directory is in use by another maintenance process, or the selector directory is unsafe.",
             Some(&plan.work_directory),
         )
     })?;
@@ -908,21 +908,21 @@ pub fn apply(
     .map_err(|_| {
         failure(
             "UPGRADE_PRECONDITION_FAILED",
-            "升级预检查失败；检查路径、服务用户权限和已有恢复记录。",
+            "Upgrade preflight failed; check paths, service-user permissions and existing recovery records.",
             Some(&plan.work_directory),
         )
     })?;
     let work = PrivateStateDirectory::open(&plan.work_directory).map_err(|_| {
         failure(
             "UPGRADE_PRECONDITION_FAILED",
-            "无法取得升级记录目录。",
+            "The upgrade-journal directory could not be acquired.",
             Some(&plan.work_directory),
         )
     })?;
     let _coordinator = work.try_maintenance_lock().map_err(|_| {
         failure(
             "MAINTENANCE_BUSY",
-            "此升级记录正在被另一维护进程使用。",
+            "Another maintenance process is using this upgrade journal.",
             Some(&plan.work_directory),
         )
     })?;
@@ -934,7 +934,7 @@ pub fn apply(
             Some(StructureFailure::ResourceCoverage) => "UPGRADE_RESOURCE_COVERAGE_FAILED",
             None => "UPGRADE_EXECUTION_FAILED",
         };
-        failure(code, format!("升级在 {:?} 阶段中断。服务保持明确的维护或可能写入状态；使用 inspect-upgrade 与 recover-upgrade。", journal.phase), Some(&plan.work_directory))
+        failure(code, format!("Upgrade interrupted during {:?}. The service remains in an explicit maintenance or potentially writable state; use inspect-upgrade and recover-upgrade.", journal.phase), Some(&plan.work_directory))
     })?;
     Ok(journal)
 }
@@ -1391,7 +1391,7 @@ pub fn inspect(work_directory: &Path) -> Result<UpgradeJournal, UpgradeFailure> 
     inspected.map_err(|_| {
         failure(
             "RECOVERY_STATE_INVALID",
-            "升级记录、备份或目录身份校验失败；未执行恢复。",
+            "Upgrade-journal, backup or directory-identity validation failed; recovery was not performed.",
             Some(work_directory),
         )
     })
@@ -1445,7 +1445,7 @@ pub fn recover(
     let _release_upgrade = native_release::coordinate(&journal.plan).map_err(|_| {
         failure(
             "MAINTENANCE_BUSY",
-            "发行目录正在被另一维护进程使用，或目录不安全。",
+            "The release directory is in use by another maintenance process, or the directory is unsafe.",
             Some(work_directory),
         )
     })?;
@@ -1455,7 +1455,7 @@ pub fn recover(
     let _instance_upgrade = coordinator_lock(&journal.plan.data_dir).map_err(|_| {
         failure(
             "MAINTENANCE_BUSY",
-            "另一个维护进程正在操作此数据目录。",
+            "Another maintenance process is operating on this data directory.",
             Some(work_directory),
         )
     })?;
@@ -1464,7 +1464,7 @@ pub fn recover(
     {
         return Err(failure(
             "RECOVERY_AUTHORIZATION_REQUIRED",
-            "运行权已经交给目标程序，可能存在升级后的业务写入。恢复旧备份将丢弃这些写入；明确授权后使用 --allow-data-loss。",
+            "Runtime ownership has been transferred to the target program, which may have received new business writes. Restoring the old backup discards those writes; use --allow-data-loss only with explicit authorization.",
             Some(work_directory),
         ));
     }
@@ -1474,14 +1474,14 @@ pub fn recover(
     let work = PrivateStateDirectory::open(work_directory).map_err(|_| {
         failure(
             "RECOVERY_STATE_INVALID",
-            "无法取得恢复目录。",
+            "The recovery directory could not be acquired.",
             Some(work_directory),
         )
     })?;
     let _coordinator = work.try_maintenance_lock().map_err(|_| {
         failure(
             "MAINTENANCE_BUSY",
-            "另一个维护进程正在使用此恢复记录。",
+            "Another maintenance process is using this recovery journal.",
             Some(work_directory),
         )
     })?;
@@ -1590,7 +1590,7 @@ pub fn recover(
     result.map_err(|_error| {
         failure(
             "RECOVERY_EXECUTION_FAILED",
-            format!("恢复在 {:?} 阶段中断。原记录与备份已保留。", journal.phase),
+            format!("Recovery interrupted during {:?}. The original journal and backups were preserved.", journal.phase),
             Some(work_directory),
         )
     })?;
