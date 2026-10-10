@@ -3,12 +3,59 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 # Deny every token capability by default. The job grants only the read access
 # needed to check out this repository.
 permissions: {}
 
 jobs:
+  # Keep PR workflows and existing check names present; filter jobs, not triggers.
+  scope:
+    name: Change scope
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      run_full: ${{ steps.changes.outputs.run_full }}
+    steps:
+      - name: Check out the comparison history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select documentation or full validation
+        id: changes
+        shell: bash
+        env:
+          PUSH_BASE: ${{ github.event.before }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          run_full=true
+          base=""
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            base="$PR_BASE"
+          elif [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF_TYPE" != tag ]]; then
+            base="$PUSH_BASE"
+          fi
+          # Dispatches, release tags, new branches and unavailable history stay full.
+          if [[ "$base" =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            git diff --name-only --no-renames -z "$base" HEAD > "$RUNNER_TEMP/changed-paths"
+            run_full=false
+            while IFS= read -r -d '' path; do
+              case "$path" in
+                # Release/package inputs and safety audits retain full validation.
+                docs/releases/* | docs/unsafe*.md) run_full=true; break ;;
+                README.md | docs/*.md) ;;
+                *) run_full=true; break ;;
+              esac
+            done < "$RUNNER_TEMP/changed-paths"
+          fi
+          echo "run_full=$run_full" >> "$GITHUB_OUTPUT"
+          echo "Full validation: $run_full"
+
   xcsc-source:
     permissions:
       contents: read
@@ -31,11 +78,17 @@ jobs:
         run: python3 xcsc-policy/scripts/check-xcsc.py --product-root product
 
   quality:
+    needs: scope
+    if: ${{ !cancelled() }}
     permissions:
       contents: read
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
+      - name: Documentation-only change
+        if: ${{ needs.scope.outputs.run_full == 'false' }}
+        shell: bash
+        run: echo "Documentation-only change; heavy build steps are not needed."
       - name: Check out repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -48,35 +101,48 @@ jobs:
         run: python3 tests/test_finalize_release.py
 
       - name: Test actual offline release documentation closure
-        run: python3 tests/test_release_docs.py
+        run: |
+          python3 tests/test_release_docs.py
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
+          mkdir "$RUNNER_TEMP/xssc-docs"
+          python3 scripts/stage-release-docs.py stage --source-root . \
+            --package-root "$RUNNER_TEMP/xssc-docs" --version "$version"
+          python3 scripts/stage-release-docs.py verify \
+            --package-root "$RUNNER_TEMP/xssc-docs" --version "$version"
 
       - name: Test signed product upgrade packaging
         run: python3 -m unittest discover -s scripts/tests -v
 
       - name: Install Rust 1.99.0
+        if: ${{ needs.scope.outputs.run_full != 'false' }}
         run: rustup toolchain install 1.99.0 --profile minimal --component rustfmt,clippy
 
       - name: Verify Rust toolchain
+        if: ${{ needs.scope.outputs.run_full != 'false' }}
         env:
           RUSTUP_TOOLCHAIN: 1.99.0
         run: rustc --version --verbose
 
       - name: Check formatting
+        if: ${{ needs.scope.outputs.run_full != 'false' }}
         env:
           RUSTUP_TOOLCHAIN: 1.99.0
         run: cargo fmt --all -- --check
 
       - name: Check all targets and features
+        if: ${{ needs.scope.outputs.run_full != 'false' }}
         env:
           RUSTUP_TOOLCHAIN: 1.99.0
         run: cargo check --locked --all-targets --all-features
 
       - name: Lint all targets and features
+        if: ${{ needs.scope.outputs.run_full != 'false' }}
         env:
           RUSTUP_TOOLCHAIN: 1.99.0
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
       - name: Test all targets and features
+        if: ${{ needs.scope.outputs.run_full != 'false' }}
         env:
           RUSTUP_TOOLCHAIN: 1.99.0
         run: cargo test --locked --all-targets --all-features
